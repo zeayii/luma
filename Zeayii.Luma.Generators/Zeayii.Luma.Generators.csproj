@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="PublishAot;PublishSingleFile;PublishTrimmed;RuntimeIdentifier;RuntimeIdentifiers;SelfContained">
+
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <RootNamespace>Zeayii.Luma.Generators</RootNamespace>
+        <Description>Luma Roslyn source generators.</Description>
+        <OutputType>Library</OutputType>
+        <IsRoslynComponent>true</IsRoslynComponent>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <IsPackable>false</IsPackable>
+        <EnableDynamicLoading>false</EnableDynamicLoading>
+        <Deterministic>true</Deterministic>
+        <IsRoslynAnalyzer>true</IsRoslynAnalyzer>
+        <IncludeBuildOutput>false</IncludeBuildOutput>
+        <PublishAot>false</PublishAot>
+        <PublishSingleFile>false</PublishSingleFile>
+        <SelfContained>false</SelfContained>
+        <PublishTrimmed>false</PublishTrimmed>
+        <RuntimeIdentifier></RuntimeIdentifier>
+        <RuntimeIdentifiers></RuntimeIdentifiers>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" PrivateAssets="all" />
+    </ItemGroup>
+
+</Project>

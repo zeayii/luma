@@ -1,0 +1,132 @@
+# =============================================================================
+# Publish - Zeayii.Luma (Public Dependencies)
+#
+# 发布范围（仅依赖库）：
+#   - Zeayii.Luma.Abstractions
+#   - Zeayii.Luma.Engine
+#   - Zeayii.Luma.Presentation
+#
+# 不发布：
+#   - Zeayii.Luma.CommandLine
+#   - Zeayii.Luma.Generators
+#
+# 同时发布到：
+#   - GitHub Packages
+#   - nuget.org
+# =============================================================================
+
+name: Publish - Zeayii.Luma (Public Dependencies)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Package version (strict X.Y.Z, e.g. 1.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  publish:
+    environment: nuget-publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate version format
+        run: |
+          if [[ ! "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version '${{ inputs.version }}'. Expected strict X.Y.Z format."
+            exit 1
+          fi
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore Zeayii.Luma.sln /p:Version=${{ inputs.version }}
+
+      - name: Build (Release)
+        run: |
+          dotnet build Zeayii.Luma.sln \
+            -c Release \
+            --no-restore \
+            /p:Version=${{ inputs.version }}
+
+      - name: Pack - Zeayii.Luma.Abstractions
+        run: |
+          dotnet pack Zeayii.Luma.Abstractions/Zeayii.Luma.Abstractions.csproj \
+            -c Release \
+            --no-build \
+            --no-restore \
+            /p:Version=${{ inputs.version }}
+
+      - name: Pack - Zeayii.Luma.Engine
+        run: |
+          dotnet pack Zeayii.Luma.Engine/Zeayii.Luma.Engine.csproj \
+            -c Release \
+            --no-build \
+            --no-restore \
+            /p:Version=${{ inputs.version }}
+
+      - name: Pack - Zeayii.Luma.Presentation
+        run: |
+          dotnet pack Zeayii.Luma.Presentation/Zeayii.Luma.Presentation.csproj \
+            -c Release \
+            --no-build \
+            --no-restore \
+            /p:Version=${{ inputs.version }}
+
+      - name: Push - GitHub Packages
+        run: |
+          dotnet nuget push "Zeayii.Luma.Abstractions/bin/Release/*.nupkg" \
+            --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+            --api-key "${{ secrets.GITHUB_TOKEN }}" \
+            --skip-duplicate
+
+          dotnet nuget push "Zeayii.Luma.Engine/bin/Release/*.nupkg" \
+            --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+            --api-key "${{ secrets.GITHUB_TOKEN }}" \
+            --skip-duplicate
+
+          dotnet nuget push "Zeayii.Luma.Presentation/bin/Release/*.nupkg" \
+            --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+            --api-key "${{ secrets.GITHUB_TOKEN }}" \
+            --skip-duplicate
+
+      - name: Push - NuGet.org
+        run: |
+          dotnet nuget push "Zeayii.Luma.Abstractions/bin/Release/*.nupkg" \
+            --source "https://api.nuget.org/v3/index.json" \
+            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --skip-duplicate
+
+          dotnet nuget push "Zeayii.Luma.Engine/bin/Release/*.nupkg" \
+            --source "https://api.nuget.org/v3/index.json" \
+            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --skip-duplicate
+
+          dotnet nuget push "Zeayii.Luma.Presentation/bin/Release/*.nupkg" \
+            --source "https://api.nuget.org/v3/index.json" \
+            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --skip-duplicate
+
+      - name: Create Git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag v${{ inputs.version }}
+          git push origin v${{ inputs.version }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          generate_release_notes: true
