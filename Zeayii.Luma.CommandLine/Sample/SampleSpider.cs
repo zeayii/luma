@@ -1,5 +1,5 @@
-using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions;
+using Zeayii.Luma.Abstractions.Abstractions;
 
 namespace Zeayii.Luma.CommandLine.Sample;
 
@@ -14,11 +14,10 @@ internal sealed class SampleSpider : ISpider
     private static readonly Uri EntryUrl = new("https://example.com");
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<LumaNode> CreateRootsAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    public ValueTask<LumaNode> CreateRootAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        await Task.CompletedTask.ConfigureAwait(false);
-        yield return new SampleListNode("sample", EntryUrl);
+        LumaNode root = new SampleListNode("sample", EntryUrl);
+        return ValueTask.FromResult(root);
     }
 }
-

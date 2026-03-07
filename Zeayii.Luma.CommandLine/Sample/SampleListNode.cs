@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Zeayii.Luma.Abstractions;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
@@ -26,18 +25,34 @@ internal sealed class SampleListNode : LumaNode
     }
 
     /// <inheritdoc />
-    public override async IAsyncEnumerable<NodeOutput> StartAsync(LumaNodeContext context, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public override ValueTask<NodeResult> StartAsync(LumaNodeContext context, CancellationToken cancellationToken)
     {
-        await Task.CompletedTask.ConfigureAwait(false);
-        yield return NodeOutput.FromRequest(new LumaRequest(_entryUrl, context.NodePath));
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return ValueTask.FromResult(new NodeResult
+        {
+            Requests =
+            [
+                new LumaRequest(_entryUrl, context.NodePath)
+            ]
+        });
     }
 
     /// <inheritdoc />
-    public override async IAsyncEnumerable<NodeOutput> ParseAsync(LumaResponse response, LumaNodeContext context, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
     {
-        await Task.CompletedTask.ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(response);
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+
         var title = response.IsSuccess ? "Example Domain" : "Request Failed";
-        yield return NodeOutput.FromItem(new SampleItem(response.FinalUrl.AbsoluteUri, title));
+        return ValueTask.FromResult(new NodeResult
+        {
+            Items =
+            [
+                new SampleItem(response.FinalUrl.AbsoluteUri, title)
+            ]
+        });
     }
 }
-

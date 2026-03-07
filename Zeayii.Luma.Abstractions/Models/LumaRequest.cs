@@ -3,7 +3,7 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// <summary>
 /// <b>抓取请求模型</b>
 /// <para>
-/// 表示框架内部可调度的一条抓取请求。
+/// 表示框架可调度的一条请求任务。
 /// </para>
 /// </summary>
 public sealed class LumaRequest
@@ -79,6 +79,11 @@ public sealed class LumaRequest
     public LumaRouteKind RouteKind { get; init; }
 
     /// <summary>
+    /// 会话策略。
+    /// </summary>
+    public RequestSessionPolicy SessionPolicy { get; init; } = RequestSessionPolicy.SiteSticky;
+
+    /// <summary>
     /// 超时时间。
     /// </summary>
     public TimeSpan? Timeout { get; init; }
@@ -94,4 +99,3 @@ public sealed class LumaRequest
     /// <returns>调试文本。</returns>
     public override string ToString() => $"{Method} {Url}";
 }
-

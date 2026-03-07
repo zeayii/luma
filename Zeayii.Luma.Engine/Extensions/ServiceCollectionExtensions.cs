@@ -1,12 +1,11 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Engine.Configuration;
 using Zeayii.Luma.Engine.Downloading;
 using Zeayii.Luma.Engine.Engine;
 using Zeayii.Luma.Engine.Html;
 using Zeayii.Luma.Engine.Policies;
-using Zeayii.Luma.Engine.Scheduling;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Zeayii.Luma.Engine.Extensions;
 
@@ -27,13 +26,10 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(options);
 
         services.TryAddSingleton(options);
-        services.TryAddSingleton<IRequestScheduler>(_ => new ChannelRequestScheduler(options.RequestChannelCapacity));
         services.TryAddSingleton<IDownloader, NetDownloader>();
         services.TryAddSingleton<IHtmlParser, AngleSharpHtmlParser>();
         services.TryAddSingleton<INodeStopPolicy, ThresholdNodeStopPolicy>();
         services.TryAddSingleton<LumaEngine>();
-
         return services;
     }
 }
-

@@ -3,7 +3,7 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// <summary>
 /// <b>节点上下文</b>
 /// <para>
-/// 供节点运行过程读取运行期资源和身份信息。
+/// 供节点读取运行身份、资源对象与取消令牌。
 /// </para>
 /// </summary>
 public sealed class LumaNodeContext
@@ -16,14 +16,23 @@ public sealed class LumaNodeContext
     /// <param name="commandName">命令名称。</param>
     /// <param name="nodePath">节点路径。</param>
     /// <param name="depth">节点深度。</param>
+    /// <param name="resources">节点资源集合。</param>
     /// <param name="cancellationToken">取消令牌。</param>
-    public LumaNodeContext(Guid runId, string runName, string commandName, string nodePath, int depth, CancellationToken cancellationToken)
+    public LumaNodeContext(
+        Guid runId,
+        string runName,
+        string commandName,
+        string nodePath,
+        int depth,
+        LumaNodeResources resources,
+        CancellationToken cancellationToken)
     {
         RunId = runId;
         RunName = runName ?? string.Empty;
         CommandName = commandName ?? string.Empty;
-        NodePath = nodePath ?? throw new ArgumentNullException(nameof(nodePath));
+        NodePath = string.IsNullOrWhiteSpace(nodePath) ? throw new ArgumentNullException(nameof(nodePath)) : nodePath;
         Depth = depth;
+        Resources = resources ?? throw new ArgumentNullException(nameof(resources));
         CancellationToken = cancellationToken;
     }
 
@@ -53,8 +62,12 @@ public sealed class LumaNodeContext
     public int Depth { get; }
 
     /// <summary>
+    /// 节点资源集合。
+    /// </summary>
+    public LumaNodeResources Resources { get; }
+
+    /// <summary>
     /// 取消令牌。
     /// </summary>
     public CancellationToken CancellationToken { get; }
 }
-

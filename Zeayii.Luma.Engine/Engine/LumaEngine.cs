@@ -1,26 +1,27 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 using Zeayii.Luma.Abstractions;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
 using Zeayii.Luma.Engine.Configuration;
 using Zeayii.Luma.Engine.Runtime;
-using Microsoft.Extensions.Logging;
+using Zeayii.Luma.Engine.Scheduling;
 
 namespace Zeayii.Luma.Engine.Engine;
 
 /// <summary>
 /// <b>爬虫引擎</b>
 /// <para>
-/// 负责驱动节点树、请求调度、下载解析、持久化和增量停止。
+/// 负责驱动节点生命周期、请求调度、下载解析、持久化与运行观测。
 /// </para>
 /// </summary>
 public sealed class LumaEngine
 {
     /// <summary>
-    /// 调度器。
+    /// 请求调度器。
     /// </summary>
-    private readonly IRequestScheduler _scheduler;
+    private readonly NodeTaskScheduler _scheduler;
 
     /// <summary>
     /// 下载器。
@@ -33,7 +34,7 @@ public sealed class LumaEngine
     private readonly IItemSink _itemSink;
 
     /// <summary>
-    /// 停止策略。
+    /// 节点停止策略。
     /// </summary>
     private readonly INodeStopPolicy _nodeStopPolicy;
 
@@ -46,6 +47,11 @@ public sealed class LumaEngine
     /// 进度管理器。
     /// </summary>
     private readonly IProgressManager _progressManager;
+
+    /// <summary>
+    /// HTML 解析器。
+    /// </summary>
+    private readonly IHtmlParser _htmlParser;
 
     /// <summary>
     /// 日志器。
@@ -95,32 +101,33 @@ public sealed class LumaEngine
     /// <summary>
     /// 初始化引擎。
     /// </summary>
-    /// <param name="scheduler">请求调度器。</param>
     /// <param name="downloader">下载器。</param>
     /// <param name="itemSink">数据项持久化入口。</param>
     /// <param name="nodeStopPolicy">节点停止策略。</param>
     /// <param name="logManager">日志管理器。</param>
     /// <param name="progressManager">进度管理器。</param>
+    /// <param name="htmlParser">HTML 解析器。</param>
     /// <param name="logger">日志器。</param>
     /// <param name="options">运行配置。</param>
     public LumaEngine(
-        IRequestScheduler scheduler,
         IDownloader downloader,
         IItemSink itemSink,
         INodeStopPolicy nodeStopPolicy,
         ILogManager logManager,
         IProgressManager progressManager,
+        IHtmlParser htmlParser,
         ILogger<LumaEngine> logger,
         LumaEngineOptions options)
     {
-        _scheduler = scheduler ?? throw new ArgumentNullException(nameof(scheduler));
         _downloader = downloader ?? throw new ArgumentNullException(nameof(downloader));
         _itemSink = itemSink ?? throw new ArgumentNullException(nameof(itemSink));
         _nodeStopPolicy = nodeStopPolicy ?? throw new ArgumentNullException(nameof(nodeStopPolicy));
         _logManager = logManager ?? throw new ArgumentNullException(nameof(logManager));
         _progressManager = progressManager ?? throw new ArgumentNullException(nameof(progressManager));
+        _htmlParser = htmlParser ?? throw new ArgumentNullException(nameof(htmlParser));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _scheduler = new NodeTaskScheduler(_options.RequestChannelCapacity);
     }
 
     /// <summary>
@@ -130,6 +137,7 @@ public sealed class LumaEngine
     /// <param name="commandName">命令名称。</param>
     /// <param name="runName">运行名称。</param>
     /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>异步任务。</returns>
     public async Task RunAsync(ISpider spider, string commandName, string runName, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(spider);
@@ -143,16 +151,15 @@ public sealed class LumaEngine
             FullMode = BoundedChannelFullMode.Wait
         });
 
-        await foreach (var root in spider.CreateRootsAsync(runRuntime.Token).ConfigureAwait(false))
-        {
-            await RegisterNodeAsync(root, parentPath: null, runRuntime).ConfigureAwait(false);
-        }
+        var resources = new LumaNodeResources(_htmlParser);
+        var rootNode = await spider.CreateRootAsync(runRuntime.Token).ConfigureAwait(false);
+        await RegisterNodeAsync(rootNode, parentPath: null, runRuntime, resources, persistChannel.Writer, prioritizeRequests: false).ConfigureAwait(false);
 
-        var persistWorkers = Enumerable.Range(0, _options.PersistWorkerCount)
+        var persistWorkers = Enumerable.Range(0, Math.Max(1, _options.PersistWorkerCount))
             .Select(_ => PersistWorkerAsync(persistChannel.Reader, runRuntime))
             .ToArray();
-        var downloadWorkers = Enumerable.Range(0, _options.DownloadWorkerCount)
-            .Select(_ => DownloadWorkerAsync(persistChannel.Writer, runRuntime))
+        var downloadWorkers = Enumerable.Range(0, Math.Max(1, _options.DownloadWorkerCount))
+            .Select(_ => DownloadWorkerAsync(persistChannel.Writer, runRuntime, resources))
             .ToArray();
         var snapshotTask = PublishSnapshotsLoopAsync(runRuntime);
 
@@ -166,6 +173,7 @@ public sealed class LumaEngine
             await Task.WhenAll(downloadWorkers).ConfigureAwait(false);
             persistChannel.Writer.TryComplete();
             await Task.WhenAll(persistWorkers).ConfigureAwait(false);
+
             if (!runRuntime.CancellationTokenSource.IsCancellationRequested)
             {
                 await runRuntime.CancellationTokenSource.CancelAsync().ConfigureAwait(false);
@@ -188,16 +196,27 @@ public sealed class LumaEngine
     }
 
     /// <summary>
-    /// 注册节点并启动其初始输出。
+    /// 注册节点并执行启动阶段。
     /// </summary>
     /// <param name="node">节点对象。</param>
     /// <param name="parentPath">父节点路径。</param>
     /// <param name="runRuntime">运行时宿主。</param>
-    private async Task RegisterNodeAsync(LumaNode node, string? parentPath, LumaRunRuntime runRuntime)
+    /// <param name="resources">节点资源集合。</param>
+    /// <param name="persistWriter">持久化写入器。</param>
+    /// <param name="prioritizeRequests">是否优先入队请求。</param>
+    /// <returns>异步任务。</returns>
+    private async Task RegisterNodeAsync(
+        LumaNode node,
+        string? parentPath,
+        LumaRunRuntime runRuntime,
+        LumaNodeResources resources,
+        ChannelWriter<ItemEnvelope> persistWriter,
+        bool prioritizeRequests)
     {
         var path = string.IsNullOrWhiteSpace(parentPath) ? node.Key : $"{parentPath}/{node.Key}";
         var depth = string.IsNullOrWhiteSpace(parentPath) ? 0 : parentPath.Count(static ch => ch == '/') + 1;
-        var runtime = new LumaNodeRuntime(node, path, depth, runRuntime.RunId, runRuntime.RunName, runRuntime.CommandName, runRuntime.Token);
+        var runtime = new LumaNodeRuntime(node, path, depth, runRuntime.RunId, runRuntime.RunName, runRuntime.CommandName, resources, runRuntime.Token);
+
         if (!_nodeRuntimes.TryAdd(path, runtime))
         {
             await runtime.DisposeAsync().ConfigureAwait(false);
@@ -209,12 +228,19 @@ public sealed class LumaEngine
 
         try
         {
-        runtime.State.SetStatus(NodeExecutionStatus.Running);
-
-            await foreach (var output in node.StartAsync(runtime.Context, runtime.Context.CancellationToken).ConfigureAwait(false))
-            {
-                await ProcessNodeOutputAsync(output, runtime, runRuntime).ConfigureAwait(false);
-            }
+            runtime.State.SetStatus(NodeExecutionStatus.Running);
+            var result = await runtime.Node.StartAsync(runtime.Context, runtime.Context.CancellationToken).ConfigureAwait(false);
+            await ProcessNodeResultAsync(result, runtime, runRuntime, persistWriter, sourceRequest: null, prioritizeRequests).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (runtime.CancellationTokenSource.IsCancellationRequested || runRuntime.Token.IsCancellationRequested)
+        {
+            runtime.State.SetStatus(NodeExecutionStatus.Cancelled, "Node initialization cancelled.");
+        }
+        catch (Exception exception)
+        {
+            runtime.State.SetStatus(NodeExecutionStatus.Failed, exception.Message);
+            _logManager.Write(LogLevelKind.Error, "Engine", $"Node start failed: {runtime.Path}", exception);
+            _logger.LogError(exception, "Node start failed: {NodePath}", runtime.Path);
         }
         finally
         {
@@ -224,55 +250,136 @@ public sealed class LumaEngine
     }
 
     /// <summary>
-    /// 处理节点输出。
+    /// 处理节点结果。
     /// </summary>
-    /// <param name="output">节点输出。</param>
-    /// <param name="nodeRuntime">节点运行时。</param>
+    /// <param name="result">节点结果。</param>
+    /// <param name="runtime">节点运行时。</param>
     /// <param name="runRuntime">运行时宿主。</param>
-    private async Task ProcessNodeOutputAsync(NodeOutput output, LumaNodeRuntime nodeRuntime, LumaRunRuntime runRuntime)
+    /// <param name="persistWriter">持久化写入器。</param>
+    /// <param name="sourceRequest">源请求。</param>
+    /// <param name="prioritizeRequests">是否优先入队请求。</param>
+    /// <returns>异步任务。</returns>
+    private async Task ProcessNodeResultAsync(
+        NodeResult result,
+        LumaNodeRuntime runtime,
+        LumaRunRuntime runRuntime,
+        ChannelWriter<ItemEnvelope> persistWriter,
+        LumaRequest? sourceRequest,
+        bool prioritizeRequests)
     {
-        switch (output)
+        ArgumentNullException.ThrowIfNull(result);
+
+        if (result.StopNode)
         {
-            case RequestNodeOutput requestOutput:
+            runtime.Cancel(result.StopReason);
+        }
+
+        foreach (var request in result.Requests)
+        {
+            var normalizedRequest = new LumaRequest(request.Url, runtime.Path)
             {
-                var sourceRequest = requestOutput.Request;
-                var request = new LumaRequest(sourceRequest.Url, nodeRuntime.Path)
-                {
-                    Method = sourceRequest.Method,
-                    Headers = sourceRequest.Headers,
-                    Metadata = sourceRequest.Metadata,
-                    Body = sourceRequest.Body,
-                    Priority = sourceRequest.Priority,
-                    Depth = sourceRequest.Depth,
-                    DontFilter = sourceRequest.DontFilter,
-                    RouteKind = sourceRequest.RouteKind,
-                    Timeout = sourceRequest.Timeout,
-                    CreatedAtUtc = sourceRequest.CreatedAtUtc
-                };
-                nodeRuntime.State.IncrementQueued();
-                Interlocked.Increment(ref _queuedRequestCount);
-                SignalStateChanged();
-                await _scheduler.EnqueueAsync(request, runRuntime.Token).ConfigureAwait(false);
-                break;
-            }
-            case ItemNodeOutput itemOutput:
+                Method = request.Method,
+                Headers = request.Headers,
+                Metadata = request.Metadata,
+                Body = request.Body,
+                Priority = request.Priority,
+                Depth = request.Depth,
+                DontFilter = request.DontFilter,
+                RouteKind = request.RouteKind,
+                SessionPolicy = request.SessionPolicy,
+                Timeout = request.Timeout,
+                CreatedAtUtc = request.CreatedAtUtc
+            };
+
+            runtime.State.IncrementQueued();
+            Interlocked.Increment(ref _queuedRequestCount);
+            SignalStateChanged();
+            await _scheduler.EnqueueAsync(normalizedRequest, prioritizeRequests, runRuntime.Token).ConfigureAwait(false);
+        }
+
+        if (result.Items.Count > 0)
+        {
+            for (var index = 0; index < result.Items.Count; index++)
             {
-                throw new InvalidOperationException($"Item output must be routed through persist pipeline by the caller: {itemOutput.Item}");
+                await persistWriter.WriteAsync(new ItemEnvelope(result.Items[index], runtime.Context, sourceRequest), runRuntime.Token).ConfigureAwait(false);
             }
-            case ChildNodeOutput childNodeOutput:
-            {
-                await RegisterNodeAsync(childNodeOutput.Node, nodeRuntime.Path, runRuntime).ConfigureAwait(false);
-                break;
-            }
+        }
+
+        if (result.Children.Count > 0)
+        {
+            await RegisterChildrenAsync(result.Children, runtime, runRuntime, persistWriter).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 按节点策略注册子节点。
+    /// </summary>
+    /// <param name="children">子节点集合。</param>
+    /// <param name="parentRuntime">父节点运行时。</param>
+    /// <param name="runRuntime">运行时宿主。</param>
+    /// <param name="persistWriter">持久化写入器。</param>
+    /// <returns>异步任务。</returns>
+    private async Task RegisterChildrenAsync(
+        IReadOnlyList<LumaNode> children,
+        LumaNodeRuntime parentRuntime,
+        LumaRunRuntime runRuntime,
+        ChannelWriter<ItemEnvelope> persistWriter)
+    {
+        var traversalPolicy = parentRuntime.Node.ExecutionOptions.ChildTraversalPolicy;
+        var prioritizeRequests = traversalPolicy == ChildTraversalPolicy.DepthFirst;
+
+        var orderedChildren = traversalPolicy == ChildTraversalPolicy.DepthFirst
+            ? children.Reverse().ToArray()
+            : children.ToArray();
+
+        var tasks = new List<Task>(orderedChildren.Length);
+        foreach (var child in orderedChildren)
+        {
+            await parentRuntime.WaitChildSlotAsync(runRuntime.Token).ConfigureAwait(false);
+            var task = RegisterChildInternalAsync(child, parentRuntime, runRuntime, persistWriter, prioritizeRequests);
+            tasks.Add(task);
+        }
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 注册单个子节点并释放并发闸门。
+    /// </summary>
+    /// <param name="child">子节点。</param>
+    /// <param name="parentRuntime">父节点运行时。</param>
+    /// <param name="runRuntime">运行时宿主。</param>
+    /// <param name="persistWriter">持久化写入器。</param>
+    /// <param name="prioritizeRequests">是否优先入队请求。</param>
+    /// <returns>异步任务。</returns>
+    private async Task RegisterChildInternalAsync(
+        LumaNode child,
+        LumaNodeRuntime parentRuntime,
+        LumaRunRuntime runRuntime,
+        ChannelWriter<ItemEnvelope> persistWriter,
+        bool prioritizeRequests)
+    {
+        try
+        {
+            await RegisterNodeAsync(child, parentRuntime.Path, runRuntime, parentRuntime.Context.Resources, persistWriter, prioritizeRequests).ConfigureAwait(false);
+        }
+        finally
+        {
+            parentRuntime.ReleaseChildSlot();
         }
     }
 
     /// <summary>
     /// 下载工作循环。
     /// </summary>
-    /// <param name="persistWriter">持久化通道写入器。</param>
+    /// <param name="persistWriter">持久化写入器。</param>
     /// <param name="runRuntime">运行时宿主。</param>
-    private async Task DownloadWorkerAsync(ChannelWriter<ItemEnvelope> persistWriter, LumaRunRuntime runRuntime)
+    /// <param name="resources">节点资源集合。</param>
+    /// <returns>异步任务。</returns>
+    private async Task DownloadWorkerAsync(
+        ChannelWriter<ItemEnvelope> persistWriter,
+        LumaRunRuntime runRuntime,
+        LumaNodeResources resources)
     {
         try
         {
@@ -284,50 +391,40 @@ public sealed class LumaEngine
                     return;
                 }
 
-                if (!_nodeRuntimes.TryGetValue(request.NodePath, out var nodeRuntime))
+                if (!_nodeRuntimes.TryGetValue(request.NodePath, out var runtime))
                 {
                     continue;
                 }
 
-                if (nodeRuntime.CancellationTokenSource.IsCancellationRequested)
+                if (runtime.CancellationTokenSource.IsCancellationRequested)
                 {
                     continue;
                 }
 
-                nodeRuntime.State.DecrementQueued();
+                runtime.State.DecrementQueued();
                 Interlocked.Decrement(ref _queuedRequestCount);
-                nodeRuntime.State.IncrementActive();
+                runtime.State.IncrementActive();
                 Interlocked.Increment(ref _activeRequestCount);
                 SignalStateChanged();
 
                 try
                 {
-                    var response = await _downloader.DownloadAsync(request, nodeRuntime.Context.CancellationToken).ConfigureAwait(false);
-                    await foreach (var output in nodeRuntime.Node.ParseAsync(response, nodeRuntime.Context, nodeRuntime.Context.CancellationToken).ConfigureAwait(false))
-                    {
-                        switch (output)
-                        {
-                            case ItemNodeOutput itemOutput:
-                                await persistWriter.WriteAsync(new ItemEnvelope(itemOutput.Item, nodeRuntime.Context), runRuntime.Token).ConfigureAwait(false);
-                                break;
-                            default:
-                                await ProcessNodeOutputAsync(output, nodeRuntime, runRuntime).ConfigureAwait(false);
-                                break;
-                        }
-                    }
+                    var response = await _downloader.DownloadAsync(request, runtime.Context.CancellationToken).ConfigureAwait(false);
+                    var result = await runtime.Node.HandleResponseAsync(response, runtime.Context, runtime.Context.CancellationToken).ConfigureAwait(false);
+                    await ProcessNodeResultAsync(result, runtime, runRuntime, persistWriter, request, prioritizeRequests: false).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (nodeRuntime.CancellationTokenSource.IsCancellationRequested || runRuntime.Token.IsCancellationRequested)
+                catch (OperationCanceledException) when (runtime.CancellationTokenSource.IsCancellationRequested || runRuntime.Token.IsCancellationRequested)
                 {
                 }
                 catch (Exception exception)
                 {
-                    nodeRuntime.State.SetStatus(NodeExecutionStatus.Failed, exception.Message);
-                    _logManager.Write(LogLevelKind.Error, "Engine", $"Node parse failed: {nodeRuntime.Path}", exception);
-                    _logger.LogError(exception, "Node parse failed: {NodePath}", nodeRuntime.Path);
+                    runtime.State.SetStatus(NodeExecutionStatus.Failed, exception.Message);
+                    _logManager.Write(LogLevelKind.Error, "Engine", $"Node response handling failed: {runtime.Path}", exception);
+                    _logger.LogError(exception, "Node response handling failed: {NodePath}", runtime.Path);
                 }
                 finally
                 {
-                    nodeRuntime.State.DecrementActive();
+                    runtime.State.DecrementActive();
                     Interlocked.Decrement(ref _activeRequestCount);
                     SignalStateChanged();
                 }
@@ -341,8 +438,9 @@ public sealed class LumaEngine
     /// <summary>
     /// 持久化工作循环。
     /// </summary>
-    /// <param name="reader">持久化通道读取器。</param>
+    /// <param name="reader">持久化读取器。</param>
     /// <param name="runRuntime">运行时宿主。</param>
+    /// <returns>异步任务。</returns>
     private async Task PersistWorkerAsync(ChannelReader<ItemEnvelope> reader, LumaRunRuntime runRuntime)
     {
         var buffer = new List<ItemEnvelope>(_options.PersistBatchSize);
@@ -379,12 +477,10 @@ public sealed class LumaEngine
     /// <summary>
     /// 读取单批持久化数据的首个元素。
     /// </summary>
-    /// <param name="reader">持久化通道读取器。</param>
+    /// <param name="reader">持久化读取器。</param>
     /// <param name="buffer">批量缓冲区。</param>
-    /// <returns>是否读取到首个元素。</returns>
-    private static async Task<bool> TryReadInitialPersistBatchItemAsync(
-        ChannelReader<ItemEnvelope> reader,
-        List<ItemEnvelope> buffer)
+    /// <returns>是否读取成功。</returns>
+    private static async Task<bool> TryReadInitialPersistBatchItemAsync(ChannelReader<ItemEnvelope> reader, List<ItemEnvelope> buffer)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(buffer);
@@ -403,15 +499,13 @@ public sealed class LumaEngine
     }
 
     /// <summary>
-    /// 在批量大小或刷新时间达到之前继续聚合持久化数据。
+    /// 聚合批量持久化数据。
     /// </summary>
-    /// <param name="reader">持久化通道读取器。</param>
+    /// <param name="reader">持久化读取器。</param>
     /// <param name="buffer">批量缓冲区。</param>
+    /// <returns>异步任务。</returns>
     private async Task FillPersistBatchAsync(ChannelReader<ItemEnvelope> reader, List<ItemEnvelope> buffer)
     {
-        ArgumentNullException.ThrowIfNull(reader);
-        ArgumentNullException.ThrowIfNull(buffer);
-
         if (buffer.Count <= 0 || buffer.Count >= _options.PersistBatchSize)
         {
             return;
@@ -457,38 +551,70 @@ public sealed class LumaEngine
     /// <param name="buffer">批量缓冲区。</param>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <param name="cancellationToken">取消令牌。</param>
-    private async Task FlushPersistBatchAsync(
-        List<ItemEnvelope> buffer,
-        LumaRunRuntime runRuntime,
-        CancellationToken cancellationToken)
+    /// <returns>异步任务。</returns>
+    private async Task FlushPersistBatchAsync(List<ItemEnvelope> buffer, LumaRunRuntime runRuntime, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(buffer);
-        ArgumentNullException.ThrowIfNull(runRuntime);
-
         if (buffer.Count <= 0)
         {
             return;
         }
 
-        IReadOnlyList<PersistResult> persistResults;
-        try
+        var persistedIndexes = new List<int>(buffer.Count);
+        var filteredEnvelopes = new List<ItemEnvelope>(buffer.Count);
+        var resolvedResults = new PersistResult[buffer.Count];
+
+        for (var index = 0; index < buffer.Count; index++)
         {
-            persistResults = await _itemSink.StoreBatchAsync(buffer, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            _logManager.Write(LogLevelKind.Error, "Persist", "Persist batch failed.", exception);
-            _logger.LogError(exception, "Persist batch failed.");
-            persistResults = CreateFailedPersistResults(buffer.Count, exception.Message);
+            var envelope = buffer[index];
+            if (!_nodeRuntimes.TryGetValue(envelope.NodePath, out var runtime))
+            {
+                resolvedResults[index] = PersistResult.Skipped("Node runtime not found.");
+                continue;
+            }
+
+            var persistContext = new PersistContext(runtime.Context, envelope.SourceRequest, index);
+            var shouldPersist = await runtime.Node.ShouldPersistAsync(envelope.Item, persistContext, cancellationToken).ConfigureAwait(false);
+            if (!shouldPersist)
+            {
+                resolvedResults[index] = PersistResult.Skipped("Filtered by node policy.");
+                continue;
+            }
+
+            persistedIndexes.Add(index);
+            filteredEnvelopes.Add(envelope);
         }
 
-        if (persistResults.Count != buffer.Count)
+        IReadOnlyList<PersistResult> batchPersistResults;
+        if (filteredEnvelopes.Count == 0)
         {
-            throw new InvalidOperationException("Persist batch result count must match input item count.");
+            batchPersistResults = Array.Empty<PersistResult>();
+        }
+        else
+        {
+            try
+            {
+                batchPersistResults = await _itemSink.StoreBatchAsync(filteredEnvelopes, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                _logManager.Write(LogLevelKind.Error, "Persist", "Persist batch failed.", exception);
+                _logger.LogError(exception, "Persist batch failed.");
+                batchPersistResults = CreateFailedPersistResults(filteredEnvelopes.Count, exception.Message);
+            }
+        }
+
+        if (batchPersistResults.Count != filteredEnvelopes.Count)
+        {
+            throw new InvalidOperationException("Persist batch result count must match filtered input count.");
+        }
+
+        for (var resultIndex = 0; resultIndex < persistedIndexes.Count; resultIndex++)
+        {
+            resolvedResults[persistedIndexes[resultIndex]] = batchPersistResults[resultIndex];
         }
 
         for (var index = 0; index < buffer.Count; index++)
@@ -499,18 +625,22 @@ public sealed class LumaEngine
                 continue;
             }
 
-            var persistResult = persistResults[index];
+            var persistResult = resolvedResults[index];
             runtime.State.ApplyPersistResult(persistResult);
             if (persistResult.Decision == PersistDecision.Stored)
             {
                 Interlocked.Increment(ref _storedItemCount);
             }
 
-            var stopToken = runtime.CancellationTokenSource.IsCancellationRequested
-                ? CancellationToken.None
-                : runtime.Context.CancellationToken;
+            var callbackContext = new PersistContext(runtime.Context, envelope.SourceRequest, index);
+            await runtime.Node.OnPersistedAsync(envelope.Item, persistResult, callbackContext, cancellationToken).ConfigureAwait(false);
+
+            var stopToken = runtime.CancellationTokenSource.IsCancellationRequested ? CancellationToken.None : runtime.Context.CancellationToken;
             var shouldStop = await _nodeStopPolicy.ShouldStopAsync(runtime.Context, persistResult, stopToken).ConfigureAwait(false);
-            if (shouldStop || (persistResult.Decision == PersistDecision.AlreadyExists && runtime.Node.ConsecutiveExistingStopThreshold > 0 && runtime.State.ConsecutiveExistingCount >= runtime.Node.ConsecutiveExistingStopThreshold))
+            if (shouldStop ||
+                (persistResult.Decision == PersistDecision.AlreadyExists &&
+                 runtime.Node.ConsecutiveExistingStopThreshold > 0 &&
+                 runtime.State.ConsecutiveExistingCount >= runtime.Node.ConsecutiveExistingStopThreshold))
             {
                 runtime.Cancel(persistResult.Message);
                 SignalStateChanged();
@@ -538,10 +668,10 @@ public sealed class LumaEngine
     }
 
     /// <summary>
-    /// 创建最终收尾批次的取消源。
+    /// 创建最终收尾批次取消源。
     /// </summary>
     /// <param name="runCancellationToken">运行级取消令牌。</param>
-    /// <returns>用于收尾刷新阶段的取消源。</returns>
+    /// <returns>取消源。</returns>
     private CancellationTokenSource CreateFinalFlushCancellationTokenSource(CancellationToken runCancellationToken)
     {
         var finalFlushTimeout = _options.PersistFlushInterval > TimeSpan.FromSeconds(5)
@@ -553,9 +683,10 @@ public sealed class LumaEngine
     }
 
     /// <summary>
-    /// 等待所有节点完成。
+    /// 等待运行完成。
     /// </summary>
     /// <param name="runRuntime">运行时宿主。</param>
+    /// <returns>异步任务。</returns>
     private async Task WaitForCompletionAsync(LumaRunRuntime runRuntime)
     {
         while (!runRuntime.Token.IsCancellationRequested)
@@ -570,8 +701,6 @@ public sealed class LumaEngine
                             runtime.CancellationTokenSource.IsCancellationRequested ? NodeExecutionStatus.Cancelled : NodeExecutionStatus.Completed,
                             runtime.State.Reason);
                     }
-
-                    runtime.Result.Complete();
                 }
 
                 return;
@@ -585,9 +714,9 @@ public sealed class LumaEngine
     }
 
     /// <summary>
-    /// 判断当前运行是否达到完成状态。
+    /// 判断当前运行是否已完成。
     /// </summary>
-    /// <returns>完成返回 <c>true</c>。</returns>
+    /// <returns>完成返回 true。</returns>
     private bool IsRunCompleted()
     {
         if (Interlocked.Read(ref _initializingNodeCount) > 0)
@@ -605,20 +734,22 @@ public sealed class LumaEngine
             return false;
         }
 
-        return _nodeRuntimes.Values.All(static runtime =>
-            runtime.State.ActiveRequestCount <= 0 &&
-            runtime.State.QueuedRequestCount <= 0);
+        return _nodeRuntimes.Values.All(static runtime => runtime.State.ActiveRequestCount <= 0 && runtime.State.QueuedRequestCount <= 0);
     }
 
     /// <summary>
-    /// 通知运行状态发生变化。
+    /// 发送状态变更信号。
     /// </summary>
-    private void SignalStateChanged() => _stateSignalChannel.Writer.TryWrite(true);
+    private void SignalStateChanged()
+    {
+        _stateSignalChannel.Writer.TryWrite(true);
+    }
 
     /// <summary>
-    /// 周期性发布进度快照。
+    /// 周期发布进度快照。
     /// </summary>
     /// <param name="runRuntime">运行时宿主。</param>
+    /// <returns>异步任务。</returns>
     private async Task PublishSnapshotsLoopAsync(LumaRunRuntime runRuntime)
     {
         try

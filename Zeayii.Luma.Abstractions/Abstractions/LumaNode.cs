@@ -5,7 +5,7 @@ namespace Zeayii.Luma.Abstractions.Abstractions;
 /// <summary>
 /// <b>抓取节点抽象基类</b>
 /// <para>
-/// 节点天然表达树状结构，可持有子节点集合，并以异步流方式向框架产出工作单元。
+/// 节点表达一个页面语义步骤，负责请求描述、响应解析、子节点扩展与数据产出。
 /// </para>
 /// </summary>
 public abstract class LumaNode
@@ -40,6 +40,11 @@ public abstract class LumaNode
     public IReadOnlyList<LumaNode> Children => _children;
 
     /// <summary>
+    /// 节点执行选项。
+    /// </summary>
+    public virtual NodeExecutionOptions ExecutionOptions => NodeExecutionOptions.Default;
+
+    /// <summary>
     /// 连续命中已存在结果后建议停止的阈值。
     /// </summary>
     public virtual int ConsecutiveExistingStopThreshold => 0;
@@ -56,38 +61,70 @@ public abstract class LumaNode
     }
 
     /// <summary>
-    /// 节点启动时产出初始工作单元。
+    /// 节点启动阶段。
     /// </summary>
     /// <param name="context">节点上下文。</param>
     /// <param name="cancellationToken">取消令牌。</param>
-    /// <returns>节点输出异步流。</returns>
-    public virtual async IAsyncEnumerable<NodeOutput> StartAsync(
-        LumaNodeContext context,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    /// <returns>节点处理结果。</returns>
+    public virtual ValueTask<NodeResult> StartAsync(LumaNodeContext context, CancellationToken cancellationToken)
     {
-        await Task.CompletedTask.ConfigureAwait(false);
-        foreach (var child in _children)
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (_children.Count == 0)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return NodeOutput.FromChild(child);
+            return ValueTask.FromResult(NodeResult.Empty);
         }
+
+        return ValueTask.FromResult(new NodeResult
+        {
+            Children = _children.ToArray()
+        });
     }
 
     /// <summary>
-    /// 节点解析响应后产出后续工作单元。
+    /// 处理响应。
     /// </summary>
     /// <param name="response">抓取响应。</param>
     /// <param name="context">节点上下文。</param>
     /// <param name="cancellationToken">取消令牌。</param>
-    /// <returns>节点输出异步流。</returns>
-    public virtual async IAsyncEnumerable<NodeOutput> ParseAsync(
+    /// <returns>节点处理结果。</returns>
+    public abstract ValueTask<NodeResult> HandleResponseAsync(
         LumaResponse response,
         LumaNodeContext context,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 判断数据项是否应进入持久化管道。
+    /// </summary>
+    /// <param name="item">数据项。</param>
+    /// <param name="context">持久化上下文。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>应持久化返回 <see langword="true"/>。</returns>
+    public virtual ValueTask<bool> ShouldPersistAsync(IItem item, PersistContext context, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(response);
-        await Task.CompletedTask.ConfigureAwait(false);
-        yield break;
+        ArgumentNullException.ThrowIfNull(item);
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(true);
+    }
+
+    /// <summary>
+    /// 持久化完成回调。
+    /// </summary>
+    /// <param name="item">数据项。</param>
+    /// <param name="persistResult">持久化结果。</param>
+    /// <param name="context">持久化上下文。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>异步任务。</returns>
+    public virtual ValueTask OnPersistedAsync(
+        IItem item,
+        PersistResult persistResult,
+        PersistContext context,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -96,5 +133,3 @@ public abstract class LumaNode
     /// <returns>展示文本。</returns>
     public override string ToString() => Key;
 }
-
-

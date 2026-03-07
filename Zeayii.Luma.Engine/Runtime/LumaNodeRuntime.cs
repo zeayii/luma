@@ -1,4 +1,3 @@
-using Zeayii.Luma.Abstractions;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
 
@@ -7,7 +6,7 @@ namespace Zeayii.Luma.Engine.Runtime;
 /// <summary>
 /// <b>节点运行时宿主</b>
 /// <para>
-/// 持有节点生命周期、取消源、上下文、状态和结果。
+/// 持有节点生命周期、取消源、上下文和状态。
 /// </para>
 /// </summary>
 internal sealed class LumaNodeRuntime : IAsyncDisposable
@@ -18,6 +17,11 @@ internal sealed class LumaNodeRuntime : IAsyncDisposable
     private int _disposed;
 
     /// <summary>
+    /// 子节点并发闸门。
+    /// </summary>
+    private readonly SemaphoreSlim _childConcurrencyGate;
+
+    /// <summary>
     /// 初始化节点运行时。
     /// </summary>
     /// <param name="node">抽象层节点。</param>
@@ -26,6 +30,7 @@ internal sealed class LumaNodeRuntime : IAsyncDisposable
     /// <param name="runId">运行标识。</param>
     /// <param name="runName">运行名称。</param>
     /// <param name="commandName">命令名称。</param>
+    /// <param name="resources">节点资源集合。</param>
     /// <param name="parentToken">父级取消令牌。</param>
     public LumaNodeRuntime(
         LumaNode node,
@@ -34,15 +39,16 @@ internal sealed class LumaNodeRuntime : IAsyncDisposable
         Guid runId,
         string runName,
         string commandName,
+        LumaNodeResources resources,
         CancellationToken parentToken)
     {
         Node = node ?? throw new ArgumentNullException(nameof(node));
-        Path = path ?? throw new ArgumentNullException(nameof(path));
+        Path = string.IsNullOrWhiteSpace(path) ? throw new ArgumentNullException(nameof(path)) : path;
         Depth = depth;
         CancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(parentToken);
-        Context = new LumaNodeContext(runId, runName, commandName, Path, Depth, CancellationTokenSource.Token);
+        Context = new LumaNodeContext(runId, runName, commandName, Path, Depth, resources, CancellationTokenSource.Token);
         State = new LumaNodeState();
-        Result = new LumaNodeResult();
+        _childConcurrencyGate = new SemaphoreSlim(Math.Max(1, Node.ExecutionOptions.ChildMaxConcurrency));
     }
 
     /// <summary>
@@ -76,9 +82,22 @@ internal sealed class LumaNodeRuntime : IAsyncDisposable
     public LumaNodeState State { get; }
 
     /// <summary>
-    /// 节点结果。
+    /// 进入子节点扩展并发闸门。
     /// </summary>
-    public LumaNodeResult Result { get; }
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>异步任务。</returns>
+    public Task WaitChildSlotAsync(CancellationToken cancellationToken)
+    {
+        return _childConcurrencyGate.WaitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 释放子节点扩展并发闸门。
+    /// </summary>
+    public void ReleaseChildSlot()
+    {
+        _childConcurrencyGate.Release();
+    }
 
     /// <summary>
     /// 尝试取消当前节点。
@@ -104,8 +123,8 @@ internal sealed class LumaNodeRuntime : IAsyncDisposable
             return ValueTask.CompletedTask;
         }
 
+        _childConcurrencyGate.Dispose();
         CancellationTokenSource.Dispose();
         return ValueTask.CompletedTask;
     }
 }
-
