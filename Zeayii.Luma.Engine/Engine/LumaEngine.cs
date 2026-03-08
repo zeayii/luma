@@ -799,6 +799,7 @@ public sealed class LumaEngine
     /// 周期发布进度快照。
     /// </summary>
     /// <param name="runRuntime">运行时宿主。</param>
+    /// <param name="scheduler">节点任务调度器。</param>
     /// <returns>异步任务。</returns>
     private async Task PublishSnapshotsLoopAsync(LumaRunRuntime runRuntime, NodeTaskScheduler scheduler)
     {
@@ -820,6 +821,7 @@ public sealed class LumaEngine
     /// 发布单次快照。
     /// </summary>
     /// <param name="runRuntime">运行时宿主。</param>
+    /// <param name="scheduler">节点任务调度器。</param>
     private void PublishSnapshot(LumaRunRuntime runRuntime, NodeTaskScheduler scheduler)
     {
         var nodes = _nodeRuntimes.Values
