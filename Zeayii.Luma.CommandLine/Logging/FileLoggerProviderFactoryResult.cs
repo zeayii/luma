@@ -7,7 +7,5 @@ namespace Zeayii.Luma.CommandLine.Logging;
 /// </summary>
 /// <param name="Provider">日志提供程序。</param>
 /// <param name="WarningMessage">告警消息。</param>
-internal readonly record struct FileLoggerProviderFactoryResult(
-    ILoggerProvider Provider,
-    string? WarningMessage);
+internal readonly record struct FileLoggerProviderFactoryResult(ILoggerProvider Provider, string? WarningMessage);
 

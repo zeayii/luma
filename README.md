@@ -2,116 +2,88 @@
 
 简体中文 | [English](./README.en.md)
 
-Zeayii.Luma 是一个面向网站抓取场景的模块化运行时框架，职责边界对齐 Scrapy 思路：
+Zeayii.Luma 是一个面向站点抓取场景的 Node 驱动运行时框架。
 
-1. Spider 负责站点业务逻辑。
-2. Engine 负责调度、下载、解析驱动和收敛停止。
-3. Presentation 负责终端可观测输出。
-4. CommandLine 和 Generators 仅作为官方示范，不建议外部项目直接复用为生产入口。
+## 1. 设计原则
 
-## 1. 模块职责总览
+1. 用户只实现 Node，不实现请求调度器。
+2. `ISpider` 只负责提供根节点，不承载解析流程。
+3. 框架统一负责请求执行、并发控制、背压、持久化与观测。
+4. 节点通过声明式选项控制子节点遍历策略和并发上限。
+5. 持久化由框架统一执行，节点只决定是否持久化与持久化后回调。
 
-- `Zeayii.Luma.Abstractions`：抽象契约与共享模型。
-- `Zeayii.Luma.Engine`：抓取运行时引擎。
-- `Zeayii.Luma.Presentation`：终端进度和日志呈现。
-- `Zeayii.Luma.CommandLine`：官方示范命令行宿主（不发布到 NuGet）。
-- `Zeayii.Luma.Generators`：官方示范源码生成器（不发布到 NuGet）。
+## 2. 模块职责
 
-## 2. 对外依赖建议
+- `Zeayii.Luma.Abstractions`
+  - 公共契约与共享模型。
+  - Node 生命周期与上下文定义。
+- `Zeayii.Luma.Engine`
+  - Node 执行器。
+  - 请求下载、调度、持久化、停止判定与快照发布。
+- `Zeayii.Luma.Presentation`
+  - 终端运行态展示。
+- `Zeayii.Luma.CommandLine`
+  - 官方示例宿主。
+- `Zeayii.Luma.Generators`
+  - 官方示例生成器。
 
-推荐外部项目最小依赖组合：
+## 3. 核心抽象
 
-1. 必选：`Zeayii.Luma.Abstractions`
-2. 必选：`Zeayii.Luma.Engine`
-3. 建议：`Zeayii.Luma.Presentation`（需要统一终端输出时）
+1. `ISpider.CreateRootAsync`：返回根节点。
+2. `LumaNode` 生命周期：
+- `StartAsync`
+- `HandleResponseAsync`
+- `ShouldPersistAsync`
+- `OnPersistedAsync`
+3. `NodeResult`：节点阶段产出对象（`Requests` / `Children` / `Items` / 停止信号）。
+4. `NodeExecutionOptions`：
+- `ChildTraversalPolicy`
+- `ChildMaxConcurrency`
+5. `LumaNodeContext`：运行元信息 + 资源能力函数（如 HTML 解析、Cookie 读写）。
 
-说明：
-
-- 外部私有项目应自行实现命令行入口（例如 `luma dmm ...`）。
-- `CommandLine` 和 `Generators` 仅用于展示官方推荐接入模式，不作为公共 SDK 稳定面。
-
-## 3. 端到端流程
+## 4. 运行流程
 
 ```mermaid
 sequenceDiagram
-    participant User as User
-    participant Host as Private CLI Host
-    participant Module as Provider Module
+    participant Host as Private Host
     participant Engine as LumaEngine
-    participant Scheduler as IRequestScheduler
+    participant Spider as ISpider
+    participant Node as LumaNode
     participant Downloader as IDownloader
-    participant Spider as ISpider/LumaNode
     participant Sink as IItemSink
     participant UI as IPresentationManager
 
-    User->>Host: run luma <provider> [options]
-    Host->>Module: ConfigureServices(IServiceCollection)
-    Host->>UI: StartAsync()
     Host->>Engine: RunAsync(spider)
-    Engine->>Spider: StartAsync(context)
-    Spider-->>Engine: Requests / Children
-    Engine->>Scheduler: Enqueue / Dequeue
+    Engine->>Spider: CreateRootAsync
+    Spider-->>Engine: RootNode
+    Engine->>Node: StartAsync(context)
+    Node-->>Engine: NodeResult(Requests/Children/Items)
     Engine->>Downloader: DownloadAsync(request)
     Downloader-->>Engine: LumaResponse
-    Engine->>Spider: ParseAsync(response)
-    Spider-->>Engine: Items / Requests / Children
+    Engine->>Node: HandleResponseAsync(response, context)
+    Node-->>Engine: NodeResult(Requests/Children/Items)
+    Engine->>Node: ShouldPersistAsync(item)
     Engine->>Sink: StoreBatchAsync(items)
-    Engine->>UI: Publish progress/log snapshots
-    Engine-->>Host: CrawlRunResult
-    Host->>UI: StopAsync()
-    Host-->>User: exit code
+    Engine->>Node: OnPersistedAsync(item, result)
+    Engine->>UI: Publish snapshots
 ```
 
-## 4. 外部用户使用方式
+## 5. 外部接入建议
 
-### 4.1 私有项目接入步骤
+1. 私有项目依赖 `Abstractions + Engine`。
+2. 按需依赖 `Presentation`。
+3. 使用私有宿主组装命令行与 provider 模块。
+4. provider 侧仅实现 Node 树与数据落库模型。
 
-1. 新建私有命令行项目（例如 `YourCompany.Luma.Dmm`）。
-2. 引用 `Abstractions + Engine`，按需引用 `Presentation`。
-3. 实现 `ILumaCommandModule`，定义子命令元数据和 DI 注册。
-4. 实现 `ISpider` 与 `LumaNode`，定义抓取拓扑和解析逻辑。
-5. 实现 `IItemSink`，负责数据库写入与冲突处理。
-6. 在私有根命令中挂载 provider 子命令并运行。
-
-### 4.2 最小依赖图
-
-```mermaid
-graph TD
-    A[Private CLI] --> B[Zeayii.Luma.Engine]
-    A --> C[Zeayii.Luma.Presentation]
-    B --> D[Zeayii.Luma.Abstractions]
-    C --> D
-```
-
-## 5. 关键运行语义
-
-1. 完成判定为信号驱动，不依赖固定轮询延迟。
-2. 下载器使用流式读取并限制响应体大小。
-3. 请求级超时由 `LumaRequest.Timeout` 驱动。
-4. 取消语义向上层传播，不吞掉取消异常。
-5. 节点注册保证原子性，避免重复注册。
-
-## 6. 构建与发布
+## 6. 构建
 
 ```bash
 dotnet build Zeayii.Luma.sln -v minimal
 ```
 
-```bash
-dotnet test Zeayii.Luma.sln -v minimal
-```
-
-仅用于私有示范宿主的 AOT 发布（非 NuGet 包）：
-
-```bash
-dotnet publish Zeayii.Luma.CommandLine/Zeayii.Luma.CommandLine.csproj -c Release -r win-x64 -p:PublishAot=true -p:PublishSingleFile=true -p:SelfContained=true -p:PublishTrimmed=true
-```
-
 ## 7. 文档导航
 
 - 架构规范：[ARCHITECTURE.md](./ARCHITECTURE.md)
-- 抽象层：[README.md](./Zeayii.Luma.Abstractions/README.md)
-- 引擎层：[README.md](./Zeayii.Luma.Engine/README.md)
-- 呈现层：[README.md](./Zeayii.Luma.Presentation/README.md)
-- 宿主示例：[README.md](./Zeayii.Luma.CommandLine/README.md)
-- 生成器示例：[README.md](./Zeayii.Luma.Generators/README.md)
+- 抽象层：[Zeayii.Luma.Abstractions/README.md](./Zeayii.Luma.Abstractions/README.md)
+- 引擎层：[Zeayii.Luma.Engine/README.md](./Zeayii.Luma.Engine/README.md)
+- 呈现层：[Zeayii.Luma.Presentation/README.md](./Zeayii.Luma.Presentation/README.md)

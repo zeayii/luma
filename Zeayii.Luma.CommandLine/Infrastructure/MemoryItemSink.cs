@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
 
@@ -10,6 +11,7 @@ namespace Zeayii.Luma.CommandLine.Infrastructure;
 /// 作为框架最小可运行示例使用。
 /// </para>
 /// </summary>
+[SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "由 DI 容器在运行时反射创建。")]
 internal sealed class MemoryItemSink : IItemSink
 {
     /// <summary>
@@ -18,9 +20,7 @@ internal sealed class MemoryItemSink : IItemSink
     private readonly ConcurrentDictionary<string, byte> _keys = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
-    public ValueTask<IReadOnlyList<PersistResult>> StoreBatchAsync(
-        IReadOnlyList<ItemEnvelope> items,
-        CancellationToken cancellationToken)
+    public ValueTask<IReadOnlyList<PersistResult>> StoreBatchAsync(IReadOnlyList<ItemEnvelope> items, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(items);
@@ -30,12 +30,9 @@ internal sealed class MemoryItemSink : IItemSink
         {
             var envelope = items[index];
             var key = $"{envelope.NodePath}:{envelope.Item}";
-            results[index] = _keys.TryAdd(key, 0)
-                ? PersistResult.Stored("Stored into memory")
-                : PersistResult.AlreadyExists("Duplicate item");
+            results[index] = _keys.TryAdd(key, 0) ? PersistResult.Stored("Stored into memory") : PersistResult.AlreadyExists("Duplicate item");
         }
 
         return ValueTask.FromResult<IReadOnlyList<PersistResult>>(results);
     }
 }
-

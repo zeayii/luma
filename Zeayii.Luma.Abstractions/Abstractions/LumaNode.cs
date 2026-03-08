@@ -89,10 +89,7 @@ public abstract class LumaNode
     /// <param name="context">节点上下文。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>节点处理结果。</returns>
-    public abstract ValueTask<NodeResult> HandleResponseAsync(
-        LumaResponse response,
-        LumaNodeContext context,
-        CancellationToken cancellationToken);
+    public abstract ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken);
 
     /// <summary>
     /// 判断数据项是否应进入持久化管道。
@@ -116,11 +113,7 @@ public abstract class LumaNode
     /// <param name="context">持久化上下文。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>异步任务。</returns>
-    public virtual ValueTask OnPersistedAsync(
-        IItem item,
-        PersistResult persistResult,
-        PersistContext context,
-        CancellationToken cancellationToken)
+    public virtual ValueTask OnPersistedAsync(IItem item, PersistResult persistResult, PersistContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(item);
         cancellationToken.ThrowIfCancellationRequested();

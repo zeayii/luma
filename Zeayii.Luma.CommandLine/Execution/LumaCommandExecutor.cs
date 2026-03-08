@@ -19,9 +19,11 @@ internal static class LumaCommandExecutor
     /// <summary>
     /// 执行站点命令。
     /// </summary>
-    public static async Task<int> ExecuteAsync<TModule>(
-        ApplicationOptions applicationOptions,
-        CancellationToken cancellationToken)
+    /// <typeparam name="TModule">命令模块类型。</typeparam>
+    /// <param name="applicationOptions">应用配置。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>进程退出码。</returns>
+    public static async Task<int> ExecuteAsync<TModule>(ApplicationOptions applicationOptions, CancellationToken cancellationToken)
         where TModule : ILumaCommandModule
     {
         ArgumentNullException.ThrowIfNull(applicationOptions);
@@ -45,7 +47,7 @@ internal static class LumaCommandExecutor
         var logManager = serviceProvider.GetRequiredService<ILogManager>();
         if (!string.IsNullOrWhiteSpace(fileLoggerProviderResult.WarningMessage))
         {
-            Console.Error.WriteLine(fileLoggerProviderResult.WarningMessage);
+            await Console.Error.WriteLineAsync(fileLoggerProviderResult.WarningMessage).ConfigureAwait(false);
             logManager.Write(Zeayii.Luma.Abstractions.Models.LogLevelKind.Warning, "Logging", fileLoggerProviderResult.WarningMessage);
         }
 
@@ -65,9 +67,8 @@ internal static class LumaCommandExecutor
         catch
         {
             await presentation.StopAsync().ConfigureAwait(false);
-            linkedCancellationTokenSource.Cancel();
+            await linkedCancellationTokenSource.CancelAsync().ConfigureAwait(false);
             throw;
         }
     }
 }
-

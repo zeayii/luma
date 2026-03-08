@@ -6,25 +6,24 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// 定义节点在子节点调度和请求会话上的运行策略。
 /// </para>
 /// </summary>
-public sealed record NodeExecutionOptions
+public sealed class NodeExecutionOptions
 {
     /// <summary>
     /// 默认执行选项。
     /// </summary>
-    public static NodeExecutionOptions Default { get; } = new();
+    public static NodeExecutionOptions Default { get; } = new()
+    {
+        ChildTraversalPolicy = ChildTraversalPolicy.Breadth,
+        ChildMaxConcurrency = 1
+    };
 
     /// <summary>
     /// 子节点遍历策略。
     /// </summary>
-    public ChildTraversalPolicy ChildTraversalPolicy { get; init; } = ChildTraversalPolicy.BreadthFirst;
+    public required ChildTraversalPolicy ChildTraversalPolicy { get; init; }
 
     /// <summary>
     /// 子节点并发上限。
     /// </summary>
-    public int ChildMaxConcurrency { get; init; } = 1;
-
-    /// <summary>
-    /// 请求会话策略。
-    /// </summary>
-    public RequestSessionPolicy RequestSessionPolicy { get; init; } = RequestSessionPolicy.SiteSticky;
+    public required int ChildMaxConcurrency { get; init; }
 }

@@ -25,20 +25,11 @@ internal sealed class RollingFileLoggerProvider : ILoggerProvider
     /// <param name="retentionDays">保留天数。</param>
     /// <param name="maxTotalMegabytes">总大小上限（MB）。</param>
     /// <param name="maxFileMegabytes">单文件大小上限（MB）。</param>
-    public RollingFileLoggerProvider(
-        DirectoryInfo logDirectory,
-        LogLevel minimumLevel,
-        int retentionDays,
-        int maxTotalMegabytes,
-        int maxFileMegabytes)
+    public RollingFileLoggerProvider(DirectoryInfo logDirectory, LogLevel minimumLevel, int retentionDays, int maxTotalMegabytes, int maxFileMegabytes)
     {
         ArgumentNullException.ThrowIfNull(logDirectory);
         _minimumLevel = minimumLevel;
-        _sink = new RollingFileLogSink(
-            logDirectory,
-            retentionDays,
-            Math.Max(1L, maxTotalMegabytes) * 1024L * 1024L,
-            Math.Max(1L, maxFileMegabytes) * 1024L * 1024L);
+        _sink = new RollingFileLogSink(logDirectory, retentionDays, Math.Max(1L, maxTotalMegabytes) * 1024L * 1024L, Math.Max(1L, maxFileMegabytes) * 1024L * 1024L);
     }
 
     /// <inheritdoc />

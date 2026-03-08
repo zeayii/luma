@@ -41,8 +41,7 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
     /// <returns>满足条件返回 <c>true</c>。</returns>
     private static bool IsEnabled(Compilation compilation)
     {
-        return compilation.GetTypeByMetadataName("Zeayii.Luma.Abstractions.CommandLine.ILumaCommandModule") is not null &&
-               compilation.GetTypeByMetadataName("System.CommandLine.RootCommand") is not null;
+        return compilation.GetTypeByMetadataName("Zeayii.Luma.Abstractions.CommandLine.ILumaCommandModule") is not null && compilation.GetTypeByMetadataName("System.CommandLine.RootCommand") is not null;
     }
 
     /// <summary>
@@ -82,11 +81,7 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
     /// <param name="moduleInterfaceSymbol">站点模块接口符号。</param>
     /// <param name="result">结果集合。</param>
     /// <param name="dedupe">去重集合。</param>
-    private static void CollectFromNamespace(
-        INamespaceSymbol namespaceSymbol,
-        INamedTypeSymbol moduleInterfaceSymbol,
-        List<ModuleMetadata> result,
-        HashSet<string> dedupe)
+    private static void CollectFromNamespace(INamespaceSymbol namespaceSymbol, INamedTypeSymbol moduleInterfaceSymbol, List<ModuleMetadata> result, HashSet<string> dedupe)
     {
         foreach (var typeMember in namespaceSymbol.GetTypeMembers())
         {
@@ -112,10 +107,7 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
         List<ModuleMetadata> result,
         HashSet<string> dedupe)
     {
-        if (typeSymbol.TypeKind == TypeKind.Class &&
-            typeSymbol.IsAbstract is false &&
-            typeSymbol.DeclaredAccessibility == Accessibility.Public &&
-            Implements(typeSymbol, moduleInterfaceSymbol))
+        if (typeSymbol.TypeKind == TypeKind.Class && typeSymbol.IsAbstract is false && typeSymbol.DeclaredAccessibility == Accessibility.Public && Implements(typeSymbol, moduleInterfaceSymbol))
         {
             var fullyQualifiedTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             if (dedupe.Add(fullyQualifiedTypeName))
@@ -155,13 +147,9 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
         }
 
         var builder = new StringBuilder(value.Length);
-        for (var index = 0; index < value.Length; index++)
+        foreach (var character in value.Where(char.IsLetterOrDigit))
         {
-            var character = value[index];
-            if (char.IsLetterOrDigit(character))
-            {
-                builder.Append(character);
-            }
+            builder.Append(character);
         }
 
         return builder.Length == 0 ? "Unknown" : builder.ToString();

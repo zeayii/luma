@@ -6,14 +6,4 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// 供呈现层展示的节点状态快照。
 /// </para>
 /// </summary>
-public readonly record struct NodeSnapshot(
-    string Path,
-    string DisplayText,
-    int Depth,
-    NodeExecutionStatus Status,
-    long StoredCount,
-    long AlreadyExistsCount,
-    long QueuedRequestCount,
-    long ActiveRequestCount,
-    string Reason);
-
+public readonly record struct NodeSnapshot(string Path, string DisplayText, int Depth, NodeExecutionStatus Status, long StoredCount, long AlreadyExistsCount, long QueuedRequestCount, long ActiveRequestCount, string Reason);

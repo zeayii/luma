@@ -3,7 +3,7 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// <summary>
 /// <b>窗口日志级别</b>
 /// </summary>
-public enum LogLevelKind : byte
+public enum LogLevelKind
 {
     /// <summary>
     /// 跟踪。

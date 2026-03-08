@@ -1,5 +1,6 @@
 using Zeayii.Luma.CommandLine.Options;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Zeayii.Luma.CommandLine.Logging;
 
@@ -13,6 +14,7 @@ internal static class FileLoggerProviderFactory
     /// </summary>
     /// <param name="applicationOptions">应用配置。</param>
     /// <returns>创建结果。</returns>
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "日志提供程序实例作为返回值交由外层宿主管理生命周期。")]
     public static FileLoggerProviderFactoryResult Create(ApplicationOptions applicationOptions)
     {
         ArgumentNullException.ThrowIfNull(applicationOptions);
@@ -22,9 +24,10 @@ internal static class FileLoggerProviderFactory
             var provider = new RollingFileLoggerProvider(
                 new DirectoryInfo(applicationOptions.LogDirectory),
                 applicationOptions.FileLogLevel,
-                Math.Max(1, applicationOptions.LogRetentionDays),
-                Math.Max(1, applicationOptions.LogTotalSizeMegabytes),
-                Math.Max(1, applicationOptions.LogFileSizeMegabytes));
+                applicationOptions.LogRetentionDays,
+                applicationOptions.LogTotalSizeMegabytes,
+                applicationOptions.LogFileSizeMegabytes
+            );
             return new FileLoggerProviderFactoryResult(provider, null);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or ArgumentException or NotSupportedException)
@@ -34,4 +37,3 @@ internal static class FileLoggerProviderFactory
         }
     }
 }
-

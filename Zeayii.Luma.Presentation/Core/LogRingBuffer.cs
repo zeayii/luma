@@ -60,7 +60,7 @@ internal sealed class LogRingBuffer
     {
         if (_count == 0)
         {
-            return Array.Empty<LogEntry>();
+            return [];
         }
 
         var result = new LogEntry[_count];

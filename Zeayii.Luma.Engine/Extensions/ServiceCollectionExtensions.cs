@@ -5,7 +5,6 @@ using Zeayii.Luma.Engine.Configuration;
 using Zeayii.Luma.Engine.Downloading;
 using Zeayii.Luma.Engine.Engine;
 using Zeayii.Luma.Engine.Html;
-using Zeayii.Luma.Engine.Policies;
 
 namespace Zeayii.Luma.Engine.Extensions;
 
@@ -28,7 +27,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton(options);
         services.TryAddSingleton<IDownloader, NetDownloader>();
         services.TryAddSingleton<IHtmlParser, AngleSharpHtmlParser>();
-        services.TryAddSingleton<INodeStopPolicy, ThresholdNodeStopPolicy>();
         services.TryAddSingleton<LumaEngine>();
         return services;
     }

@@ -6,7 +6,7 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// 表示一次数据持久化的最终语义结果。
 /// </para>
 /// </summary>
-public enum PersistDecision : byte
+public enum PersistDecision
 {
     /// <summary>
     /// 已成功存储。

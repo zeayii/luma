@@ -5,49 +5,25 @@ namespace Zeayii.Luma.CommandLine.Logging;
 /// <summary>
 /// <b>滚动文件日志器</b>
 /// </summary>
-internal sealed class RollingFileLogger : ILogger
+/// <param name="categoryName">分类名。</param>
+/// <param name="minimumLevel">最低输出等级。</param>
+/// <param name="sink">写入汇聚器。</param>
+internal sealed class RollingFileLogger(string categoryName, LogLevel minimumLevel, RollingFileLogSink sink) : ILogger
 {
     /// <summary>
     /// 日志分类名。
     /// </summary>
-    private readonly string _categoryName;
+    private readonly string _categoryName = string.IsNullOrWhiteSpace(categoryName) ? "App" : categoryName;
 
-    /// <summary>
-    /// 最低输出等级。
-    /// </summary>
-    private readonly LogLevel _minimumLevel;
-
-    /// <summary>
-    /// 文件写入汇聚器。
-    /// </summary>
-    private readonly RollingFileLogSink _sink;
-
-    /// <summary>
-    /// 初始化文件日志器。
-    /// </summary>
-    /// <param name="categoryName">分类名。</param>
-    /// <param name="minimumLevel">最低输出等级。</param>
-    /// <param name="sink">写入汇聚器。</param>
-    public RollingFileLogger(string categoryName, LogLevel minimumLevel, RollingFileLogSink sink)
-    {
-        _categoryName = string.IsNullOrWhiteSpace(categoryName) ? "App" : categoryName;
-        _minimumLevel = minimumLevel;
-        _sink = sink ?? throw new ArgumentNullException(nameof(sink));
-    }
 
     /// <inheritdoc />
-    public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+    public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Shared;
 
     /// <inheritdoc />
-    public bool IsEnabled(LogLevel logLevel) => logLevel >= _minimumLevel;
+    public bool IsEnabled(LogLevel logLevel) => logLevel >= minimumLevel;
 
     /// <inheritdoc />
-    public void Log<TState>(
-        LogLevel logLevel,
-        EventId eventId,
-        TState state,
-        Exception? exception,
-        Func<TState, Exception?, string> formatter)
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
         ArgumentNullException.ThrowIfNull(formatter);
         if (!IsEnabled(logLevel))
@@ -63,7 +39,7 @@ internal sealed class RollingFileLogger : ILogger
             line = $"{line}{Environment.NewLine}{exception}";
         }
 
-        _sink.WriteLine(line);
+        sink.WriteLine(line);
     }
 
     /// <summary>
@@ -74,12 +50,10 @@ internal sealed class RollingFileLogger : ILogger
         /// <summary>
         /// 单例实例。
         /// </summary>
-        public static readonly NullScope Instance = new();
+        public static readonly NullScope Shared = new();
 
         /// <inheritdoc />
-        public void Dispose()
-        {
-        }
+        public void Dispose() { }
     }
 }
 

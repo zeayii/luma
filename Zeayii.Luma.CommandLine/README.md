@@ -24,7 +24,7 @@ sequenceDiagram
     Root->>Module: ConfigureServices
     Root->>Executor: ExecuteAsync<TModule>()
     Executor->>Engine: RunAsync(spider)
-    Engine-->>Executor: CrawlRunResult
+    Engine-->>Executor: Run completed
     Executor-->>Root: exit code
 ```
 

@@ -6,10 +6,7 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// 表示一次 item 持久化后的标准化结果。
 /// </para>
 /// </summary>
-public readonly record struct PersistResult(
-    PersistDecision Decision,
-    string Message,
-    bool SuggestStopNode = false)
+public readonly record struct PersistResult(PersistDecision Decision, string Message, bool SuggestStopNode = false)
 {
     /// <summary>
     /// 构造存储成功结果。
@@ -24,8 +21,7 @@ public readonly record struct PersistResult(
     /// <param name="message">结果消息。</param>
     /// <param name="suggestStopNode">是否建议停止当前节点。</param>
     /// <returns>持久化结果。</returns>
-    public static PersistResult AlreadyExists(string message = "AlreadyExists", bool suggestStopNode = false)
-        => new(PersistDecision.AlreadyExists, message, suggestStopNode);
+    public static PersistResult AlreadyExists(string message = "AlreadyExists", bool suggestStopNode = false) => new(PersistDecision.AlreadyExists, message, suggestStopNode);
 
     /// <summary>
     /// 构造跳过结果。

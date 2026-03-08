@@ -13,8 +13,6 @@ public interface IItemSink
     /// <param name="items">待持久化数据项集合。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>与输入顺序一一对应的持久化结果集合。</returns>
-    ValueTask<IReadOnlyList<PersistResult>> StoreBatchAsync(
-        IReadOnlyList<ItemEnvelope> items,
-        CancellationToken cancellationToken);
+    ValueTask<IReadOnlyList<PersistResult>> StoreBatchAsync(IReadOnlyList<ItemEnvelope> items, CancellationToken cancellationToken);
 }
 

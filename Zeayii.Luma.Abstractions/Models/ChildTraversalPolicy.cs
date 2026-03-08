@@ -6,15 +6,15 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// 定义当前节点产生子节点时的调度顺序偏好。
 /// </para>
 /// </summary>
-public enum ChildTraversalPolicy : byte
+public enum ChildTraversalPolicy
 {
     /// <summary>
     /// 广度优先。
     /// </summary>
-    BreadthFirst = 0,
+    Breadth = 0,
 
     /// <summary>
     /// 深度优先。
     /// </summary>
-    DepthFirst = 1
+    Depth = 1
 }

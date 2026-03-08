@@ -1,4 +1,5 @@
 using System.Net;
+using System.Diagnostics.CodeAnalysis;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
 using Zeayii.Luma.Engine.Configuration;
@@ -9,36 +10,19 @@ namespace Zeayii.Luma.Engine.Downloading;
 /// <summary>
 /// <b>基于 Zeayii.Infrastructure.Net.Http 的默认下载器</b>
 /// </summary>
-internal sealed class NetDownloader : IDownloader
+/// <param name="netClient">网络客户端入口。</param>
+/// <param name="options">引擎运行配置。</param>
+[SuppressMessage("Reliability", "CA2007:Do not directly await a Task", Justification = "await using 释放路径不适用 ConfigureAwait 链式写法。")]
+public sealed class NetDownloader(INetClient netClient, LumaEngineOptions options) : IDownloader
 {
-    /// <summary>
-    /// 网络客户端入口。
-    /// </summary>
-    private readonly INetClient _netClient;
-
-    /// <summary>
-    /// 引擎运行配置。
-    /// </summary>
-    private readonly LumaEngineOptions _options;
-
-    /// <summary>
-    /// 初始化下载器。
-    /// </summary>
-    /// <param name="netClient">网络客户端入口。</param>
-    /// <param name="options">引擎运行配置。</param>
-    public NetDownloader(INetClient netClient, LumaEngineOptions options)
-    {
-        _netClient = netClient ?? throw new ArgumentNullException(nameof(netClient));
-        _options = options ?? throw new ArgumentNullException(nameof(options));
-    }
-
     /// <inheritdoc />
-    public async ValueTask<LumaResponse> DownloadAsync(LumaRequest request, CancellationToken cancellationToken)
+    public async ValueTask<LumaResponse> DownloadAsync(LumaRequest request, LumaNodeContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
 
         var routeKind = request.RouteKind == LumaRouteKind.Proxy ? NetRouteKind.Proxy : NetRouteKind.Direct;
-        await using var lease = await _netClient.RentAsync(routeKind, cancellationToken).ConfigureAwait(false);
+        await using var lease = await netClient.RentAsync(routeKind, cancellationToken).ConfigureAwait(false);
         using var timeoutCancellationTokenSource = CreateTimeoutCancellationTokenSource(request, cancellationToken);
         var effectiveCancellationToken = timeoutCancellationTokenSource?.Token ?? cancellationToken;
 
@@ -68,15 +52,8 @@ internal sealed class NetDownloader : IDownloader
                 headers[header.Key] = string.Join(", ", header.Value);
             }
 
-            var body = await ReadBodyAsync(response, _options.MaxResponseBodyBytes, effectiveCancellationToken).ConfigureAwait(false);
-            return new LumaResponse(
-                request,
-                (int)response.StatusCode,
-                response.RequestMessage?.RequestUri ?? request.Url,
-                headers,
-                body,
-                DateTimeOffset.UtcNow,
-                string.Empty);
+            var body = await ReadBodyAsync(response, options.MaxResponseBodyBytes, effectiveCancellationToken).ConfigureAwait(false);
+            return new LumaResponse(request, (int)response.StatusCode, response.RequestMessage?.RequestUri ?? request.Url, headers, body, DateTimeOffset.UtcNow, string.Empty);
         }
         catch (OperationCanceledException) when (effectiveCancellationToken.IsCancellationRequested)
         {
@@ -84,14 +61,7 @@ internal sealed class NetDownloader : IDownloader
         }
         catch (Exception exception) when (exception is HttpRequestException or WebException)
         {
-            return new LumaResponse(
-                request,
-                0,
-                request.Url,
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
-                ReadOnlyMemory<byte>.Empty,
-                DateTimeOffset.UtcNow,
-                exception.Message);
+            return new LumaResponse(request, 0, request.Url, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), ReadOnlyMemory<byte>.Empty, DateTimeOffset.UtcNow, exception.Message);
         }
     }
 
@@ -149,4 +119,3 @@ internal sealed class NetDownloader : IDownloader
         }
     }
 }
-

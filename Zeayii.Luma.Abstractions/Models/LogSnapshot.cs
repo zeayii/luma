@@ -11,6 +11,6 @@ public sealed class LogSnapshot
     /// <summary>
     /// 快照中的日志条目集合。
     /// </summary>
-    public IReadOnlyList<LogEntry> Entries { get; init; } = Array.Empty<LogEntry>();
+    public IReadOnlyList<LogEntry> Entries { get; init; } = [];
 }
 

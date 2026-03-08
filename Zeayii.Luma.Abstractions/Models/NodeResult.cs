@@ -18,17 +18,17 @@ public sealed record NodeResult
     /// <summary>
     /// 下一批请求。
     /// </summary>
-    public IReadOnlyList<LumaRequest> Requests { get; init; } = Array.Empty<LumaRequest>();
+    public IReadOnlyList<LumaRequest> Requests { get; init; } = [];
 
     /// <summary>
     /// 下一批子节点。
     /// </summary>
-    public IReadOnlyList<LumaNode> Children { get; init; } = Array.Empty<LumaNode>();
+    public IReadOnlyList<LumaNode> Children { get; init; } = [];
 
     /// <summary>
     /// 当前批次待持久化数据项。
     /// </summary>
-    public IReadOnlyList<IItem> Items { get; init; } = Array.Empty<IItem>();
+    public IReadOnlyList<IItem> Items { get; init; } = [];
 
     /// <summary>
     /// 是否建议停止当前节点。

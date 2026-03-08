@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Zeayii.Luma.CommandLine.Logging;
 
@@ -77,11 +78,7 @@ internal sealed class RollingFileLogSink : IDisposable
     /// <param name="retentionDays">日志保留天数。</param>
     /// <param name="maxTotalBytes">日志总大小上限（字节）。</param>
     /// <param name="maxFileBytes">单日志文件大小上限（字节）。</param>
-    public RollingFileLogSink(
-        DirectoryInfo logDirectory,
-        int retentionDays,
-        long maxTotalBytes,
-        long maxFileBytes)
+    public RollingFileLogSink(DirectoryInfo logDirectory, int retentionDays, long maxTotalBytes, long maxFileBytes)
     {
         _logDirectory = logDirectory ?? throw new ArgumentNullException(nameof(logDirectory));
         _retentionDays = Math.Max(1, retentionDays);
@@ -103,11 +100,7 @@ internal sealed class RollingFileLogSink : IDisposable
             FullMode = BoundedChannelFullMode.DropOldest
         });
 
-        _consumerTask = Task.Factory.StartNew(
-            () => ConsumeLoopAsync(_stopCancellationTokenSource.Token).GetAwaiter().GetResult(),
-            _stopCancellationTokenSource.Token,
-            TaskCreationOptions.LongRunning,
-            TaskScheduler.Default);
+        _consumerTask = Task.Factory.StartNew(() => ConsumeLoopAsync(_stopCancellationTokenSource.Token).GetAwaiter().GetResult(), _stopCancellationTokenSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
     }
 
     /// <summary>
@@ -126,6 +119,7 @@ internal sealed class RollingFileLogSink : IDisposable
     }
 
     /// <inheritdoc />
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "释放阶段需要吞掉后台收尾异常，保证进程退出路径稳定。")]
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -139,8 +133,9 @@ internal sealed class RollingFileLogSink : IDisposable
         {
             _consumerTask.GetAwaiter().GetResult();
         }
-        catch
+        catch (Exception)
         {
+            // ignore
         }
 
         _writer.Dispose();
@@ -160,10 +155,10 @@ internal sealed class RollingFileLogSink : IDisposable
                 while (_channel.Reader.TryRead(out var line))
                 {
                     RotateIfNeeded(line);
-                    _writer.WriteLine(line);
+                    await _writer.WriteLineAsync(line).ConfigureAwait(false);
                 }
 
-                _writer.Flush();
+                await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -174,10 +169,10 @@ internal sealed class RollingFileLogSink : IDisposable
             while (_channel.Reader.TryRead(out var line))
             {
                 RotateIfNeeded(line);
-                _writer.WriteLine(line);
+                await _writer.WriteLineAsync(line).ConfigureAwait(false);
             }
 
-            _writer.Flush();
+            await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -235,10 +230,7 @@ internal sealed class RollingFileLogSink : IDisposable
     /// <returns>写入器实例。</returns>
     private static StreamWriter CreateWriter(string path)
     {
-        return new StreamWriter(new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
-        {
-            AutoFlush = false
-        };
+        return new StreamWriter(new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = false };
     }
 
     /// <summary>
@@ -246,9 +238,7 @@ internal sealed class RollingFileLogSink : IDisposable
     /// </summary>
     private void CleanupPolicyFiles()
     {
-        var files = _logDirectory.GetFiles("crawler-*.log", SearchOption.TopDirectoryOnly)
-            .OrderBy(static file => file.Name, StringComparer.Ordinal)
-            .ToList();
+        var files = _logDirectory.GetFiles("crawler-*.log", SearchOption.TopDirectoryOnly).OrderBy(static file => file.Name, StringComparer.Ordinal).ToList();
         if (files.Count <= 0)
         {
             return;
@@ -308,8 +298,7 @@ internal sealed class RollingFileLogSink : IDisposable
     private static bool TryParseDateFromFileName(string fileName, out DateOnly date)
     {
         date = DateOnly.MinValue;
-        if (!fileName.StartsWith("crawler-", StringComparison.OrdinalIgnoreCase) ||
-            !fileName.EndsWith(".log", StringComparison.OrdinalIgnoreCase))
+        if (!fileName.StartsWith("crawler-", StringComparison.OrdinalIgnoreCase) || !fileName.EndsWith(".log", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -338,7 +327,7 @@ internal sealed class RollingFileLogSink : IDisposable
         {
             return new FileInfo(path).Length;
         }
-        catch
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or NotSupportedException)
         {
             return 0;
         }
@@ -356,7 +345,7 @@ internal sealed class RollingFileLogSink : IDisposable
             file.Delete();
             return true;
         }
-        catch
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or NotSupportedException)
         {
             return false;
         }

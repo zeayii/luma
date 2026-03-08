@@ -1,6 +1,6 @@
 using System.CommandLine;
-using global::Infrastructure.Net.Http.Configuration.Policies;
-using global::Infrastructure.Net.Http.Logging;
+using Infrastructure.Net.Http.Configuration.Policies;
+using Infrastructure.Net.Http.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Zeayii.Luma.CommandLine.Options;

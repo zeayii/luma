@@ -1,5 +1,5 @@
-using global::Infrastructure.Net.Http.Configuration.Policies;
-using global::Infrastructure.Net.Http.Logging;
+using Infrastructure.Net.Http.Configuration.Policies;
+using Infrastructure.Net.Http.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Zeayii.Luma.CommandLine.Options;
@@ -10,7 +10,7 @@ namespace Zeayii.Luma.CommandLine.Options;
 /// 由命令行统一解析得到的全局输入参数。
 /// </para>
 /// </summary>
-public sealed class ApplicationOptions
+internal sealed class ApplicationOptions
 {
     /// <summary>
     /// 当前命令名称。
@@ -115,7 +115,7 @@ public sealed class ApplicationOptions
     /// <summary>
     /// 代理地址原始值列表。
     /// </summary>
-    public required string[] Proxies { get; init; }
+    public required IReadOnlyList<string> Proxies { get; init; }
 
     /// <summary>
     /// 是否启用重试。

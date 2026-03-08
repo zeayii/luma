@@ -1,5 +1,3 @@
-using System.CommandLine;
-
 namespace Zeayii.Luma.CommandLine.Commands;
 
 /// <summary>

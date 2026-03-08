@@ -2,23 +2,28 @@
 
 [简体中文](./README.md) | English
 
-This module defines the stable contract layer of Luma and is a required dependency for private consumers.
+This module defines the stable public contracts of Luma.
 
 ## Responsibilities
 
-1. Defines command-module contract `ILumaCommandModule`.
-2. Defines crawl contracts `ISpider` and node base type `LumaNode`.
-3. Defines shared request/response/parse-output/persistence models.
+1. Defines provider entry contract: `ISpider`.
+2. Defines node lifecycle base type: `LumaNode`.
+3. Defines shared models:
+- `LumaRequest` / `LumaResponse`
+- `NodeResult` / `NodeExecutionOptions`
+- `LumaNodeContext` / `LumaNodeResources` (Context exposes parsing and Cookie capability functions)
+- `PersistResult` / `PersistContext`
 
-## Consumer Guidance
+## Design Principles
 
-1. External projects should reference this module directly instead of duplicating interfaces.
-2. Provider-specific implementations should stay in private projects.
-3. Public model changes must remain backward compatible.
+1. Contract stability first.
+2. No concrete downloader/scheduler implementations.
+3. No provider-specific business models.
+4. Provider code should program against Node lifecycle only.
 
 ## What Must Not Be Added Here
 
-1. Concrete downloader implementations.
-2. Concrete scheduler implementations.
-3. CLI parameter binding and host lifecycle logic.
+1. Downloader implementations.
+2. Scheduler implementations.
+3. CLI host workflow.
 4. Terminal rendering logic.

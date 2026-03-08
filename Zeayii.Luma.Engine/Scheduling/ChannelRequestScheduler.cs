@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-using System.Threading;
 using Zeayii.Luma.Abstractions.Models;
 
 namespace Zeayii.Luma.Engine.Scheduling;
@@ -10,12 +8,19 @@ namespace Zeayii.Luma.Engine.Scheduling;
 /// 提供支持队首/队尾插入的请求调度能力，用于实现节点级广度/深度扩展偏好。
 /// </para>
 /// </summary>
-internal sealed class NodeTaskScheduler
+/// <param name="capacity">队列容量上限。</param>
+/// <param name="consumerCount">消费者数量。</param>
+internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisposable
 {
     /// <summary>
-    /// 请求队列。
+    /// 优先请求队列（Depth 策略）。
     /// </summary>
-    private readonly LinkedList<LumaRequest> _queue = [];
+    private readonly LinkedList<LumaRequest> _priorityQueue = [];
+
+    /// <summary>
+    /// 普通请求队列（Breadth 策略）。
+    /// </summary>
+    private readonly LinkedList<LumaRequest> _normalQueue = [];
 
     /// <summary>
     /// 队列互斥锁。
@@ -25,12 +30,12 @@ internal sealed class NodeTaskScheduler
     /// <summary>
     /// 可读信号量。
     /// </summary>
-    private readonly SemaphoreSlim _signal = new(0);
+    private readonly SemaphoreSlim _availableItems = new(0);
 
     /// <summary>
-    /// 最大容量。
+    /// 可写槽位信号量（统一容量背压）。
     /// </summary>
-    private readonly int _capacity;
+    private readonly SemaphoreSlim _availableSlots = new(Math.Max(1, capacity), Math.Max(1, capacity));
 
     /// <summary>
     /// 当前队列长度。
@@ -43,13 +48,9 @@ internal sealed class NodeTaskScheduler
     private int _completed;
 
     /// <summary>
-    /// 初始化调度器。
+    /// 消费者数量。
     /// </summary>
-    /// <param name="capacity">队列容量上限。</param>
-    public NodeTaskScheduler(int capacity)
-    {
-        _capacity = Math.Max(1, capacity);
-    }
+    private readonly int _consumerCount = Math.Max(1, consumerCount);
 
     /// <summary>
     /// 当前排队数量。
@@ -67,7 +68,13 @@ internal sealed class NodeTaskScheduler
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        while (true)
+        if (Volatile.Read(ref _completed) != 0)
+        {
+            throw new InvalidOperationException("Scheduler is completed.");
+        }
+
+        await _availableSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (Volatile.Read(ref _completed) != 0)
@@ -75,32 +82,26 @@ internal sealed class NodeTaskScheduler
                 throw new InvalidOperationException("Scheduler is completed.");
             }
 
-            var enqueued = false;
             lock (_syncRoot)
             {
-                if (_queue.Count < _capacity)
+                if (prioritize)
                 {
-                    if (prioritize)
-                    {
-                        _queue.AddFirst(request);
-                    }
-                    else
-                    {
-                        _queue.AddLast(request);
-                    }
-
-                    enqueued = true;
-                    Interlocked.Increment(ref _count);
+                    _priorityQueue.AddLast(request);
                 }
+                else
+                {
+                    _normalQueue.AddLast(request);
+                }
+
+                Interlocked.Increment(ref _count);
             }
 
-            if (enqueued)
-            {
-                _signal.Release();
-                return;
-            }
-
-            await Task.Delay(5, cancellationToken).ConfigureAwait(false);
+            _availableItems.Release();
+        }
+        catch
+        {
+            _availableSlots.Release();
+            throw;
         }
     }
 
@@ -115,34 +116,37 @@ internal sealed class NodeTaskScheduler
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (Volatile.Read(ref _completed) != 0)
+            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0)
             {
-                lock (_syncRoot)
+                return null;
+            }
+
+            await _availableItems.WaitAsync(cancellationToken).ConfigureAwait(false);
+            lock (_syncRoot)
+            {
+                LinkedListNode<LumaRequest>? node = null;
+                if (_priorityQueue.First is not null)
                 {
-                    if (_queue.Count == 0)
-                    {
-                        return null;
-                    }
+                    node = _priorityQueue.First;
+                    _priorityQueue.RemoveFirst();
+                }
+                else if (_normalQueue.First is not null)
+                {
+                    node = _normalQueue.First;
+                    _normalQueue.RemoveFirst();
+                }
+
+                if (node is not null)
+                {
+                    Interlocked.Decrement(ref _count);
+                    _availableSlots.Release();
+                    return node.Value;
                 }
             }
 
-            await _signal.WaitAsync(cancellationToken).ConfigureAwait(false);
-            lock (_syncRoot)
+            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0)
             {
-                if (_queue.First is null)
-                {
-                    if (Volatile.Read(ref _completed) != 0)
-                    {
-                        return null;
-                    }
-
-                    continue;
-                }
-
-                var node = _queue.First;
-                _queue.RemoveFirst();
-                Interlocked.Decrement(ref _count);
-                return node.Value;
+                return null;
             }
         }
     }
@@ -157,6 +161,15 @@ internal sealed class NodeTaskScheduler
             return;
         }
 
-        _signal.Release();
+        _availableItems.Release(_consumerCount);
+    }
+
+    /// <summary>
+    /// 释放调度器资源。
+    /// </summary>
+    public void Dispose()
+    {
+        _availableItems.Dispose();
+        _availableSlots.Dispose();
     }
 }

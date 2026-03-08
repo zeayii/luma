@@ -30,13 +30,7 @@ internal sealed class SampleListNode : LumaNode
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        return ValueTask.FromResult(new NodeResult
-        {
-            Requests =
-            [
-                new LumaRequest(_entryUrl, context.NodePath)
-            ]
-        });
+        return ValueTask.FromResult(new NodeResult { Requests = [new LumaRequest(_entryUrl, context.NodePath)] });
     }
 
     /// <inheritdoc />
@@ -47,12 +41,6 @@ internal sealed class SampleListNode : LumaNode
         cancellationToken.ThrowIfCancellationRequested();
 
         var title = response.IsSuccess ? "Example Domain" : "Request Failed";
-        return ValueTask.FromResult(new NodeResult
-        {
-            Items =
-            [
-                new SampleItem(response.FinalUrl.AbsoluteUri, title)
-            ]
-        });
+        return ValueTask.FromResult(new NodeResult { Items = [new SampleItem(response.FinalUrl.AbsoluteUri, title)] });
     }
 }

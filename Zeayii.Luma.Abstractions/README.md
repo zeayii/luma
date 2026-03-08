@@ -2,23 +2,28 @@
 
 简体中文 | [English](./README.en.md)
 
-本模块定义 Luma 的稳定契约层，是外部私有项目必须依赖的基础模块。
+本模块定义 Luma 的稳定契约层。
 
 ## 职责
 
-1. 定义命令模块契约 `ILumaCommandModule`。
-2. 定义抓取契约 `ISpider` 与节点基类 `LumaNode`。
-3. 定义请求、响应、解析输出、持久化结果等共享模型。
+1. 定义站点入口契约：`ISpider`。
+2. 定义节点生命周期基类：`LumaNode`。
+3. 定义共享模型：
+- `LumaRequest` / `LumaResponse`
+- `NodeResult` / `NodeExecutionOptions`
+- `LumaNodeContext` / `LumaNodeResources`（Context 对外暴露解析与 Cookie 能力函数）
+- `PersistResult` / `PersistContext`
 
-## 对外使用建议
+## 设计原则
 
-1. 外部项目应直接依赖本模块，不复制接口定义。
-2. Provider 特定实现应放在私有项目，不进入抽象层。
-3. 变更公共模型字段时，必须保证向后兼容。
+1. 契约稳定优先。
+2. 不放入具体下载、调度实现。
+3. 不放入 provider 专属业务模型。
+4. 让业务只面向 Node 编程。
 
 ## 不应放入本模块的内容
 
-1. 下载器具体实现。
-2. 调度器具体实现。
-3. 命令行参数绑定和宿主生命周期逻辑。
-4. 终端渲染逻辑。
+1. 下载器实现。
+2. 调度器实现。
+3. 命令行宿主流程。
+4. 终端展示逻辑。

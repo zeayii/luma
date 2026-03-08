@@ -6,7 +6,7 @@ namespace Zeayii.Luma.Presentation.Core;
 /// <summary>
 /// <b>进度管理器</b>
 /// </summary>
-internal sealed class ProgressManager : IProgressManager
+public sealed class ProgressManager : IProgressManager
 {
     /// <summary>
     /// 当前快照引用。

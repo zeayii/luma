@@ -2,116 +2,88 @@
 
 [简体中文](./README.md) | English
 
-Zeayii.Luma is a modular crawling runtime framework aligned with Scrapy-style boundaries:
+Zeayii.Luma is a Node-driven crawling runtime framework for private provider integrations.
 
-1. Spider owns provider logic.
-2. Engine owns scheduling, downloading, parse orchestration, and convergence.
-3. Presentation owns runtime observability.
-4. CommandLine and Generators are official samples, not the public production entry contract.
+## 1. Design Principles
 
-## 1. Module Responsibilities
+1. Users implement Nodes, not schedulers.
+2. `ISpider` only provides the root node.
+3. The framework owns request execution, concurrency, backpressure, persistence, and observability.
+4. Nodes declare traversal and child-concurrency preferences through options.
+5. Persistence execution is centralized in Engine; nodes only filter and receive callbacks.
 
-- `Zeayii.Luma.Abstractions`: contracts and shared models.
-- `Zeayii.Luma.Engine`: crawling runtime engine.
-- `Zeayii.Luma.Presentation`: terminal progress/log rendering.
-- `Zeayii.Luma.CommandLine`: official host sample (not published to NuGet).
-- `Zeayii.Luma.Generators`: official source-generator sample (not published to NuGet).
+## 2. Module Responsibilities
 
-## 2. Dependency Guidance for External Users
+- `Zeayii.Luma.Abstractions`
+  - Public contracts and shared models.
+  - Node lifecycle and context definitions.
+- `Zeayii.Luma.Engine`
+  - Node runtime executor.
+  - Downloading, scheduling, persistence, stop decisions, and snapshot publishing.
+- `Zeayii.Luma.Presentation`
+  - Terminal runtime rendering.
+- `Zeayii.Luma.CommandLine`
+  - Official sample host.
+- `Zeayii.Luma.Generators`
+  - Official sample generator.
 
-Recommended minimal dependency set:
+## 3. Core Contracts
 
-1. Required: `Zeayii.Luma.Abstractions`
-2. Required: `Zeayii.Luma.Engine`
-3. Recommended: `Zeayii.Luma.Presentation` (when consistent terminal UX is required)
+1. `ISpider.CreateRootAsync`: provides the root node.
+2. `LumaNode` lifecycle:
+- `StartAsync`
+- `HandleResponseAsync`
+- `ShouldPersistAsync`
+- `OnPersistedAsync`
+3. `NodeResult`: stage output container (`Requests` / `Children` / `Items` / stop signal).
+4. `NodeExecutionOptions`:
+- `ChildTraversalPolicy`
+- `ChildMaxConcurrency`
+5. `LumaNodeContext`: runtime metadata + resource capability functions (for example HTML parsing and Cookie operations).
 
-Notes:
-
-- Private projects should implement their own CLI host (for example `luma dmm ...`).
-- `CommandLine` and `Generators` demonstrate patterns and are not part of the stable public SDK surface.
-
-## 3. End-to-End Flow
+## 4. Runtime Flow
 
 ```mermaid
 sequenceDiagram
-    participant User as User
-    participant Host as Private CLI Host
-    participant Module as Provider Module
+    participant Host as Private Host
     participant Engine as LumaEngine
-    participant Scheduler as IRequestScheduler
+    participant Spider as ISpider
+    participant Node as LumaNode
     participant Downloader as IDownloader
-    participant Spider as ISpider/LumaNode
     participant Sink as IItemSink
     participant UI as IPresentationManager
 
-    User->>Host: run luma <provider> [options]
-    Host->>Module: ConfigureServices(IServiceCollection)
-    Host->>UI: StartAsync()
     Host->>Engine: RunAsync(spider)
-    Engine->>Spider: StartAsync(context)
-    Spider-->>Engine: Requests / Children
-    Engine->>Scheduler: Enqueue / Dequeue
+    Engine->>Spider: CreateRootAsync
+    Spider-->>Engine: RootNode
+    Engine->>Node: StartAsync(context)
+    Node-->>Engine: NodeResult(Requests/Children/Items)
     Engine->>Downloader: DownloadAsync(request)
     Downloader-->>Engine: LumaResponse
-    Engine->>Spider: ParseAsync(response)
-    Spider-->>Engine: Items / Requests / Children
+    Engine->>Node: HandleResponseAsync(response, context)
+    Node-->>Engine: NodeResult(Requests/Children/Items)
+    Engine->>Node: ShouldPersistAsync(item)
     Engine->>Sink: StoreBatchAsync(items)
-    Engine->>UI: Publish progress/log snapshots
-    Engine-->>Host: CrawlRunResult
-    Host->>UI: StopAsync()
-    Host-->>User: exit code
+    Engine->>Node: OnPersistedAsync(item, result)
+    Engine->>UI: Publish snapshots
 ```
 
-## 4. How External Projects Should Use Luma
+## 5. Consumer Guidance
 
-### 4.1 Integration Steps
+1. Private projects should reference `Abstractions + Engine`.
+2. Add `Presentation` only when terminal rendering is required.
+3. Build your own host and module wiring in private repositories.
+4. Provider modules should only model node trees and persistence payloads.
 
-1. Create a private CLI project (for example `YourCompany.Luma.Dmm`).
-2. Reference `Abstractions + Engine`, optionally `Presentation`.
-3. Implement `ILumaCommandModule` for subcommand metadata and DI registration.
-4. Implement `ISpider` and `LumaNode` for crawl topology and parsing.
-5. Implement `IItemSink` for database persistence and conflict handling.
-6. Wire provider subcommands in your private root command.
-
-### 4.2 Minimal Dependency Graph
-
-```mermaid
-graph TD
-    A[Private CLI] --> B[Zeayii.Luma.Engine]
-    A --> C[Zeayii.Luma.Presentation]
-    B --> D[Zeayii.Luma.Abstractions]
-    C --> D
-```
-
-## 5. Runtime Semantics
-
-1. Completion is signal-driven rather than fixed-delay polling.
-2. Downloader is streaming and response-body bounded.
-3. Request timeout is controlled by `LumaRequest.Timeout`.
-4. Cancellation is propagated and never swallowed.
-5. Node registration is atomic to avoid duplicate registration.
-
-## 6. Build and Publish
+## 6. Build
 
 ```bash
 dotnet build Zeayii.Luma.sln -v minimal
 ```
 
-```bash
-dotnet test Zeayii.Luma.sln -v minimal
-```
-
-AOT publish command for private host sample (not for NuGet package publishing):
-
-```bash
-dotnet publish Zeayii.Luma.CommandLine/Zeayii.Luma.CommandLine.csproj -c Release -r win-x64 -p:PublishAot=true -p:PublishSingleFile=true -p:SelfContained=true -p:PublishTrimmed=true
-```
-
 ## 7. Documentation Index
 
 - Architecture: [ARCHITECTURE.en.md](./ARCHITECTURE.en.md)
-- Abstractions: [README.en.md](./Zeayii.Luma.Abstractions/README.en.md)
-- Engine: [README.en.md](./Zeayii.Luma.Engine/README.en.md)
-- Presentation: [README.en.md](./Zeayii.Luma.Presentation/README.en.md)
-- Host sample: [README.en.md](./Zeayii.Luma.CommandLine/README.en.md)
-- Generator sample: [README.en.md](./Zeayii.Luma.Generators/README.en.md)
+- Abstractions: [Zeayii.Luma.Abstractions/README.en.md](./Zeayii.Luma.Abstractions/README.en.md)
+- Engine: [Zeayii.Luma.Engine/README.en.md](./Zeayii.Luma.Engine/README.en.md)
+- Presentation: [Zeayii.Luma.Presentation/README.en.md](./Zeayii.Luma.Presentation/README.en.md)

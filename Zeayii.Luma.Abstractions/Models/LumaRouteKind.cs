@@ -6,7 +6,7 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// 用于描述一次抓取请求应通过何种网络出口发送。
 /// </para>
 /// </summary>
-public enum LumaRouteKind : byte
+public enum LumaRouteKind
 {
     /// <summary>
     /// 直连出口。

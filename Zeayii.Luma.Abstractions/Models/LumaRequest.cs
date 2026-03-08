@@ -24,8 +24,6 @@ public sealed class LumaRequest
         NodePath = string.IsNullOrWhiteSpace(nodePath) ? throw new ArgumentNullException(nameof(nodePath)) : nodePath;
         Method = HttpMethod.Get;
         Headers = EmptyHeaders;
-        Metadata = EmptyHeaders;
-        CreatedAtUtc = DateTimeOffset.UtcNow;
     }
 
     /// <summary>
@@ -49,29 +47,9 @@ public sealed class LumaRequest
     public IReadOnlyDictionary<string, string> Headers { get; init; }
 
     /// <summary>
-    /// 请求元数据。
-    /// </summary>
-    public IReadOnlyDictionary<string, string> Metadata { get; init; }
-
-    /// <summary>
     /// 请求体。
     /// </summary>
     public ReadOnlyMemory<byte> Body { get; init; }
-
-    /// <summary>
-    /// 请求优先级。
-    /// </summary>
-    public int Priority { get; init; }
-
-    /// <summary>
-    /// 抓取深度。
-    /// </summary>
-    public int Depth { get; init; }
-
-    /// <summary>
-    /// 是否跳过去重。
-    /// </summary>
-    public bool DontFilter { get; init; }
 
     /// <summary>
     /// 路由类型。
@@ -79,19 +57,9 @@ public sealed class LumaRequest
     public LumaRouteKind RouteKind { get; init; }
 
     /// <summary>
-    /// 会话策略。
-    /// </summary>
-    public RequestSessionPolicy SessionPolicy { get; init; } = RequestSessionPolicy.SiteSticky;
-
-    /// <summary>
     /// 超时时间。
     /// </summary>
     public TimeSpan? Timeout { get; init; }
-
-    /// <summary>
-    /// 创建时间（UTC）。
-    /// </summary>
-    public DateTimeOffset CreatedAtUtc { get; init; }
 
     /// <summary>
     /// 返回调试文本。

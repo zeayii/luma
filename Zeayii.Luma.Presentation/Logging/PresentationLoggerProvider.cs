@@ -8,24 +8,12 @@ namespace Zeayii.Luma.Presentation.Logging;
 /// <summary>
 /// <b>Presentation 日志提供程序</b>
 /// </summary>
-internal sealed class PresentationLoggerProvider(
-    ILogManager logManager,
-    PresentationOptions options) : ILoggerProvider
+public sealed class PresentationLoggerProvider(ILogManager logManager, PresentationOptions options) : ILoggerProvider
 {
-    /// <summary>
-    /// 日志管理器。
-    /// </summary>
-    private readonly ILogManager _logManager = logManager ?? throw new ArgumentNullException(nameof(logManager));
-
-    /// <summary>
-    /// 呈现配置。
-    /// </summary>
-    private readonly PresentationOptions _options = options ?? throw new ArgumentNullException(nameof(options));
-
     /// <inheritdoc />
     public ILogger CreateLogger(string categoryName)
     {
-        return new PresentationLogger(categoryName, _logManager, _options);
+        return new PresentationLogger(categoryName, logManager, options);
     }
 
     /// <inheritdoc />
@@ -36,10 +24,7 @@ internal sealed class PresentationLoggerProvider(
     /// <summary>
     /// <b>Presentation 日志器</b>
     /// </summary>
-    private sealed class PresentationLogger(
-        string categoryName,
-        ILogManager logManager,
-        PresentationOptions options) : ILogger
+    private sealed class PresentationLogger(string categoryName, ILogManager logManager, PresentationOptions options) : ILogger
     {
         /// <summary>
         /// 日志分类名。
@@ -57,18 +42,13 @@ internal sealed class PresentationLoggerProvider(
         private readonly PresentationOptions _options = options;
 
         /// <inheritdoc />
-        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Shared;
 
         /// <inheritdoc />
         public bool IsEnabled(LogLevel logLevel) => logLevel >= _options.MinimumLogLevel;
 
         /// <inheritdoc />
-        public void Log<TState>(
-            LogLevel logLevel,
-            EventId eventId,
-            TState state,
-            Exception? exception,
-            Func<TState, Exception?, string> formatter)
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
             ArgumentNullException.ThrowIfNull(formatter);
             var message = formatter(state, exception);
@@ -100,13 +80,10 @@ internal sealed class PresentationLoggerProvider(
             /// <summary>
             /// 单例实例。
             /// </summary>
-            public static readonly NullScope Instance = new();
+            public static readonly NullScope Shared = new();
 
             /// <inheritdoc />
-            public void Dispose()
-            {
-            }
+            public void Dispose() { }
         }
     }
 }
-

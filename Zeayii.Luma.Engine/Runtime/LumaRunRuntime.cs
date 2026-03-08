@@ -11,6 +11,11 @@ internal sealed class LumaRunRuntime : IAsyncDisposable
     private int _disposed;
 
     /// <summary>
+    /// 运行状态。
+    /// </summary>
+    private string _status = "Running";
+
+    /// <summary>
     /// 初始化运行时宿主。
     /// </summary>
     /// <param name="commandName">命令名称。</param>
@@ -18,7 +23,7 @@ internal sealed class LumaRunRuntime : IAsyncDisposable
     /// <param name="parentToken">父级取消令牌。</param>
     public LumaRunRuntime(string commandName, string runName, CancellationToken parentToken)
     {
-        CommandName = commandName ?? string.Empty;
+        CommandName = commandName;
         RunName = string.IsNullOrWhiteSpace(runName) ? $"{CommandName}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}" : runName;
         RunId = Guid.NewGuid();
         CancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(parentToken);
@@ -56,6 +61,21 @@ internal sealed class LumaRunRuntime : IAsyncDisposable
     public CancellationToken Token => CancellationTokenSource.Token;
 
     /// <summary>
+    /// 运行状态。
+    /// </summary>
+    public string Status => Volatile.Read(ref _status);
+
+    /// <summary>
+    /// 设置运行状态。
+    /// </summary>
+    /// <param name="status">状态文本。</param>
+    public void SetStatus(string status)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(status);
+        Volatile.Write(ref _status, status);
+    }
+
+    /// <summary>
     /// 释放运行时。
     /// </summary>
     /// <returns>异步任务。</returns>
@@ -70,4 +90,3 @@ internal sealed class LumaRunRuntime : IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 }
-

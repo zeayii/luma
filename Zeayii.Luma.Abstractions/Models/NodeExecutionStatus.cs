@@ -3,7 +3,7 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// <summary>
 /// <b>节点执行状态</b>
 /// </summary>
-public enum NodeExecutionStatus : byte
+public enum NodeExecutionStatus
 {
     /// <summary>
     /// 待启动。

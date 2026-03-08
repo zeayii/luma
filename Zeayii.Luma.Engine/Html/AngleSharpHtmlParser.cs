@@ -7,7 +7,7 @@ namespace Zeayii.Luma.Engine.Html;
 /// <summary>
 /// <b>基于 AngleSharp 的默认 HTML 解析器</b>
 /// </summary>
-internal sealed class AngleSharpHtmlParser : IHtmlParser
+public sealed class AngleSharpHtmlParser : IHtmlParser
 {
     /// <summary>
     /// 文档浏览上下文。

@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using System.Globalization;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
 using Zeayii.Luma.Presentation.Configuration;
@@ -13,7 +14,7 @@ namespace Zeayii.Luma.Presentation.Core;
 /// 采用多生产者入队、单消费者聚合的模型。
 /// </para>
 /// </summary>
-internal sealed class LogManager : ILogManager, IDisposable
+public sealed class LogManager : ILogManager, IDisposable
 {
     /// <summary>
     /// 待消费日志载荷。
@@ -23,12 +24,7 @@ internal sealed class LogManager : ILogManager, IDisposable
     /// <param name="Tag">日志标签。</param>
     /// <param name="Message">日志消息。</param>
     /// <param name="ExceptionText">异常文本。</param>
-    private readonly record struct PendingLogEntry(
-        DateTimeOffset Timestamp,
-        LogLevelKind Level,
-        string Tag,
-        string Message,
-        string ExceptionText);
+    private readonly record struct PendingLogEntry(DateTimeOffset Timestamp, LogLevelKind Level, string Tag, string Message, string ExceptionText);
 
     /// <summary>
     /// 呈现配置。
@@ -104,13 +100,7 @@ internal sealed class LogManager : ILogManager, IDisposable
         var processed = 0;
         while (processed < maxBatch && _pendingEntries.Reader.TryRead(out var entry))
         {
-            var logEntry = new LogEntry(
-                ++_nextSequenceId,
-                entry.Timestamp,
-                entry.Level,
-                entry.Tag,
-                entry.Message,
-                entry.ExceptionText);
+            var logEntry = new LogEntry(++_nextSequenceId, entry.Timestamp, entry.Level, entry.Tag, entry.Message);
             _ringBuffer.Enqueue(logEntry);
             _lastConsumedSequence = logEntry.SequenceId;
             processed++;
@@ -125,16 +115,11 @@ internal sealed class LogManager : ILogManager, IDisposable
             return;
         }
 
-        var entry = new PendingLogEntry(
-            DateTimeOffset.UtcNow,
-            level,
-            tag,
-            message,
-            exception?.ToString() ?? string.Empty);
+        var entry = new PendingLogEntry(DateTimeOffset.UtcNow, level, tag, message, exception?.ToString() ?? string.Empty);
 
         if (!_isPresentationStarted)
         {
-            WriteToConsole(new LogEntry(0, entry.Timestamp, entry.Level, entry.Tag, entry.Message, entry.ExceptionText));
+            WriteToConsole(new LogEntry(0, entry.Timestamp, entry.Level, entry.Tag, entry.Message));
             return;
         }
 
@@ -218,7 +203,7 @@ internal sealed class LogManager : ILogManager, IDisposable
             _ => Color.White
         };
 
-        var timestamp = entry.Timestamp.ToLocalTime().ToString("HH:mm:ss");
+        var timestamp = entry.Timestamp.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
         AnsiConsole.MarkupLine($"[grey]{timestamp}[/] [bold {color}][[{Markup.Escape(entry.Tag)}]][/] {Markup.Escape(entry.Message)}");
     }
 }

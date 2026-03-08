@@ -13,10 +13,7 @@ namespace Zeayii.Luma.Presentation.Window;
 /// 采用单线程事件循环和快照驱动渲染。
 /// </para>
 /// </summary>
-internal sealed class PresentationManager(
-    PresentationOptions options,
-    ILogManager logManager,
-    IProgressManager progressManager) : IPresentationManager
+public sealed class PresentationManager(PresentationOptions options, ILogManager logManager, IProgressManager progressManager) : IPresentationManager
 {
     /// <summary>
     /// 窗口生命周期取消源。
@@ -38,6 +35,11 @@ internal sealed class PresentationManager(
     /// </summary>
     private bool _isStarted;
 
+    /// <summary>
+    /// 停止请求标记。
+    /// </summary>
+    private int _stopRequested;
+
     /// <inheritdoc />
     public async Task RunAsync(CancellationToken cancellationToken)
     {
@@ -47,20 +49,22 @@ internal sealed class PresentationManager(
         }
 
         _isStarted = true;
-        using var localCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var localCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _lifecycleCancellationTokenSource = localCancellationTokenSource;
+        _stopRequested = 0;
         logManager.MarkPresentationStarted();
 
         try
         {
+            var lifecycleToken = localCancellationTokenSource.Token;
             if (Console.IsOutputRedirected || Console.IsErrorRedirected)
             {
-                while (!localCancellationTokenSource.IsCancellationRequested)
+                while (!lifecycleToken.IsCancellationRequested)
                 {
                     try
                     {
                         logManager.DrainPendingEntries();
-                        await Task.Delay(options.RefreshInterval, localCancellationTokenSource.Token).ConfigureAwait(false);
+                        await Task.Delay(options.RefreshInterval, lifecycleToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
                     {
@@ -75,14 +79,19 @@ internal sealed class PresentationManager(
             {
                 await AnsiConsole.Live(Render()).AutoClear(false).StartAsync(async context =>
                 {
-                    while (!localCancellationTokenSource.IsCancellationRequested)
+                    while (!lifecycleToken.IsCancellationRequested)
                     {
-                        PollKeyboardInput(localCancellationTokenSource);
+                        PollKeyboardInput();
+                        if (Volatile.Read(ref _stopRequested) != 0)
+                        {
+                            await StopAsync().ConfigureAwait(false);
+                        }
+
                         context.UpdateTarget(Render());
 
                         try
                         {
-                            await Task.Delay(options.RefreshInterval, localCancellationTokenSource.Token).ConfigureAwait(false);
+                            await Task.Delay(options.RefreshInterval, lifecycleToken).ConfigureAwait(false);
                         }
                         catch (OperationCanceledException)
                         {
@@ -95,12 +104,12 @@ internal sealed class PresentationManager(
             }
             catch (IOException)
             {
-                while (!localCancellationTokenSource.IsCancellationRequested)
+                while (!lifecycleToken.IsCancellationRequested)
                 {
                     try
                     {
                         logManager.DrainPendingEntries();
-                        await Task.Delay(options.RefreshInterval, localCancellationTokenSource.Token).ConfigureAwait(false);
+                        await Task.Delay(options.RefreshInterval, lifecycleToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
                     {
@@ -112,21 +121,24 @@ internal sealed class PresentationManager(
         finally
         {
             _lifecycleCancellationTokenSource = null;
+            localCancellationTokenSource.Dispose();
         }
     }
 
     /// <inheritdoc />
-    public ValueTask StopAsync()
+    public async ValueTask StopAsync()
     {
-        _lifecycleCancellationTokenSource?.Cancel();
-        return ValueTask.CompletedTask;
+        if (_lifecycleCancellationTokenSource is not null)
+        {
+            await _lifecycleCancellationTokenSource.CancelAsync().ConfigureAwait(false);
+        }
     }
 
     /// <summary>
     /// 渲染整个窗口。
     /// </summary>
     /// <returns>可渲染对象。</returns>
-    private IRenderable Render()
+    private Rows Render()
     {
         logManager.DrainPendingEntries();
         var progressSnapshot = progressManager.CreateSnapshot();
@@ -172,7 +184,7 @@ internal sealed class PresentationManager(
     /// </summary>
     /// <param name="nodes">节点快照集合。</param>
     /// <returns>可见文本集合。</returns>
-    private IReadOnlyList<string> SelectNodes(IReadOnlyList<NodeSnapshot> nodes)
+    private string[] SelectNodes(IReadOnlyList<NodeSnapshot> nodes)
     {
         if (nodes.Count == 0)
         {
@@ -183,7 +195,11 @@ internal sealed class PresentationManager(
         return nodes
             .Skip(start)
             .Take(20)
-            .Select(static node => $"{new string(' ', node.Depth * 2)}[{ResolveNodeColor(node.Status)}]{Markup.Escape(node.DisplayText)}[/] [grey](Stored={node.StoredCount}, Exists={node.AlreadyExistsCount}, Q={node.QueuedRequestCount}, A={node.ActiveRequestCount})[/]")
+            .Select(static node =>
+            {
+                var reasonText = string.IsNullOrWhiteSpace(node.Reason) ? string.Empty : $" [darkorange]Reason={Markup.Escape(node.Reason)}[/]";
+                return $"{new string(' ', node.Depth * 2)}[{ResolveNodeColor(node.Status)}]{Markup.Escape(node.DisplayText)}[/] [grey](Path={Markup.Escape(node.Path)}, Stored={node.StoredCount}, Exists={node.AlreadyExistsCount}, Q={node.QueuedRequestCount}, A={node.ActiveRequestCount})[/]{reasonText}";
+            })
             .ToArray();
     }
 
@@ -192,7 +208,7 @@ internal sealed class PresentationManager(
     /// </summary>
     /// <param name="logEntries">日志快照集合。</param>
     /// <returns>可见文本集合。</returns>
-    private IReadOnlyList<string> SelectLogs(IReadOnlyList<LogEntry> logEntries)
+    private string[] SelectLogs(IReadOnlyList<LogEntry> logEntries)
     {
         if (logEntries.Count == 0)
         {
@@ -210,8 +226,7 @@ internal sealed class PresentationManager(
     /// <summary>
     /// 轮询键盘输入。
     /// </summary>
-    /// <param name="lifecycleCancellationTokenSource">窗口生命周期取消源。</param>
-    private void PollKeyboardInput(CancellationTokenSource lifecycleCancellationTokenSource)
+    private void PollKeyboardInput()
     {
         while (Console.KeyAvailable)
         {
@@ -252,7 +267,7 @@ internal sealed class PresentationManager(
                     _nodeOffset += 10;
                     break;
                 case ConsoleKey.Q:
-                    lifecycleCancellationTokenSource.Cancel();
+                    Interlocked.Exchange(ref _stopRequested, 1);
                     break;
             }
         }
@@ -291,4 +306,3 @@ internal sealed class PresentationManager(
         };
     }
 }
-

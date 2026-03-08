@@ -32,21 +32,14 @@ internal sealed class LumaNodeRuntime : IAsyncDisposable
     /// <param name="commandName">命令名称。</param>
     /// <param name="resources">节点资源集合。</param>
     /// <param name="parentToken">父级取消令牌。</param>
-    public LumaNodeRuntime(
-        LumaNode node,
-        string path,
-        int depth,
-        Guid runId,
-        string runName,
-        string commandName,
-        LumaNodeResources resources,
-        CancellationToken parentToken)
+    public LumaNodeRuntime(LumaNode node, string path, int depth, Guid runId, string runName, string commandName, LumaNodeResources resources, CancellationToken parentToken)
     {
         Node = node ?? throw new ArgumentNullException(nameof(node));
         Path = string.IsNullOrWhiteSpace(path) ? throw new ArgumentNullException(nameof(path)) : path;
         Depth = depth;
+        Resources = resources ?? throw new ArgumentNullException(nameof(resources));
         CancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(parentToken);
-        Context = new LumaNodeContext(runId, runName, commandName, Path, Depth, resources, CancellationTokenSource.Token);
+        Context = new LumaNodeContext(runId, runName, commandName, Path, Depth, Resources, CancellationTokenSource.Token);
         State = new LumaNodeState();
         _childConcurrencyGate = new SemaphoreSlim(Math.Max(1, Node.ExecutionOptions.ChildMaxConcurrency));
     }
@@ -65,6 +58,11 @@ internal sealed class LumaNodeRuntime : IAsyncDisposable
     /// 节点深度。
     /// </summary>
     public int Depth { get; }
+
+    /// <summary>
+    /// 节点资源集合。
+    /// </summary>
+    public LumaNodeResources Resources { get; }
 
     /// <summary>
     /// 节点取消源。

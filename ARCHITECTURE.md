@@ -4,127 +4,99 @@
 
 ## 1. 架构目标
 
-1. 维持 Scrapy 风格职责分层，避免宿主、引擎、展示耦合。
-2. 支持私有站点实现快速接入，不绑定官方命令行模板。
-3. 支持可观测、可中断、可扩展的长期运行抓取。
+1. 以 Node 为唯一业务扩展面，降低 provider 实现复杂度。
+2. 将请求链路与并发调度收敛到框架层统一治理。
+3. 让持久化策略可扩展，同时保持执行路径统一。
+4. 提供可观测、可取消、可收敛的运行时闭环。
 
-## 2. 项目维度（Project）
+## 2. 分层与边界
 
-- `Zeayii.Luma.Abstractions`
-  - 对外稳定契约
-  - 共享请求/响应/解析/持久化模型
-- `Zeayii.Luma.Engine`
-  - 请求调度、下载驱动、解析调度、持久化调度
-  - 收敛判定和停止策略
-- `Zeayii.Luma.Presentation`
-  - 终端日志与进度输出
-- `Zeayii.Luma.CommandLine`（示范）
-  - 官方参考宿主，不作为 SDK 稳定面
-- `Zeayii.Luma.Generators`（示范）
-  - 官方参考生成器，不作为 SDK 稳定面
+- `ISpider`
+  - 仅提供根节点。
+- `LumaNode`
+  - 业务语义步骤。
+  - 负责请求描述、响应解析、子节点创建、持久化策略回调。
+- `LumaEngine`
+  - 调度、下载、生命周期驱动、持久化执行、停止判定、快照发布。
+- `IItemSink`
+  - 持久化写入入口。
+- `IPresentationManager`
+  - 展示层，不参与业务执行决策。
 
-## 3. 程序集维度（Assembly）
+## 3. Node 生命周期
 
-- `Zeayii.Luma.Abstractions.dll`
-  - `ILumaCommandModule`
-  - `ISpider` / `LumaNode`
-  - `LumaRequest` / `LumaResponse` / `PersistResult`
-- `Zeayii.Luma.Engine.dll`
-  - `LumaEngine`
-  - `IRequestScheduler` 默认实现
-  - `IDownloader` 默认实现
-- `Zeayii.Luma.Presentation.dll`
-  - `IPresentationManager` 默认实现
-  - 快照渲染组件
-- `luma`（示范可执行程序）
-  - 仅在 `Zeayii.Luma.CommandLine` 中存在
+1. `StartAsync(context)`
+- 节点启动阶段，产出初始 `NodeResult`。
 
-## 4. 外部依赖边界
+2. `HandleResponseAsync(response, context)`
+- 响应处理阶段，产出后续请求、子节点与数据项。
 
-外部私有项目建议：
+3. `ShouldPersistAsync(item, persistContext)`
+- 节点级持久化过滤。
 
-1. 强制依赖 `Abstractions + Engine`。
-2. 需要统一终端输出时再依赖 `Presentation`。
-3. 不依赖 `CommandLine` 与 `Generators`，自行实现 provider 子命令入口。
+4. `OnPersistedAsync(item, persistResult, persistContext)`
+- 节点级持久化回调。
 
-## 5. 生命周期时序
+## 4. 数据模型语义
+
+1. `NodeResult`
+- `Requests`
+- `Children`
+- `Items`
+- `StopNode` / `StopReason`
+
+2. `NodeExecutionOptions`
+- `ChildTraversalPolicy`：`Breadth` / `Depth`
+- `ChildMaxConcurrency`
+
+3. `LumaNodeContext`
+- 运行元信息（RunId、RunName、Path、Depth）
+- 资源能力函数（例如 HTML 解析、Cookie 读写）
+- `CancellationToken`
+
+## 5. 运行时流程
 
 ```mermaid
 sequenceDiagram
-    participant Program as Private Program
-    participant Root as Private RootCommand
-    participant Module as ILumaCommandModule
+    participant Host as Private Host
     participant Engine as LumaEngine
-    participant Scheduler as IRequestScheduler
+    participant Spider as ISpider
+    participant Node as LumaNode
     participant Downloader as IDownloader
-    participant Spider as LumaNode
     participant Sink as IItemSink
-    participant UI as IPresentationManager
 
-    Program->>Root: Parse(args)
-    Root->>Module: ConfigureServices(services)
-    Root->>UI: StartAsync()
-    Root->>Engine: RunAsync(spider)
-    Engine->>Spider: StartAsync
-    Spider-->>Engine: Requests / Children
-    Engine->>Scheduler: Enqueue / Dequeue
+    Host->>Engine: RunAsync(spider)
+    Engine->>Spider: CreateRootAsync
+    Spider-->>Engine: RootNode
+    Engine->>Node: StartAsync
+    Node-->>Engine: NodeResult
     Engine->>Downloader: DownloadAsync
-    Downloader-->>Engine: Response
-    Engine->>Spider: ParseAsync
-    Spider-->>Engine: Items / Requests / Children
+    Downloader-->>Engine: LumaResponse
+    Engine->>Node: HandleResponseAsync
+    Node-->>Engine: NodeResult
+    Engine->>Node: ShouldPersistAsync
     Engine->>Sink: StoreBatchAsync
-    Engine->>UI: Publish snapshots
-    Engine-->>Root: CrawlRunResult
-    Root->>UI: StopAsync()
+    Engine->>Node: OnPersistedAsync
 ```
 
-## 6. 运行时内部时序（Engine Loop，GitHub 渲染版）
+## 6. 调度与并发策略
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Engine as LumaEngine
-    participant Scheduler as IRequestScheduler
-    participant Downloader as IDownloader
-    participant Node as LumaNode Parser
-    participant Sink as IItemSink
+1. 全局并发由引擎统一控制。
+2. 子节点并发由节点 `ChildMaxConcurrency` 声明。
+3. 子节点遍历顺序由节点 `ChildTraversalPolicy` 声明。
+4. 队列背压由调度器实现，避免无限入队。
 
-    Engine->>Node: StartAsync(root)
-    Node-->>Engine: SeedRequests
-    Engine->>Scheduler: Enqueue(SeedRequests)
-    Engine->>Scheduler: TryDequeue()
-    Scheduler-->>Engine: Request
-    Engine->>Downloader: DownloadAsync(Request)
-    Downloader-->>Engine: Response
-    Engine->>Node: ParseAsync(Response)
-    Node-->>Engine: Items and NextRequests
-    Engine->>Sink: StoreBatchAsync(Items)
-    Sink-->>Engine: PersistResults
-    Engine->>Scheduler: Enqueue(NextRequests)
-    Engine-->>Engine: CheckConvergenceAndContinue
-    Engine-->>Engine: Return CrawlRunResult
-```
+## 7. 设计约束
 
-## 7. 关键设计约束
+1. Node 不直接调用数据库接口。
+2. Node 不直接实现下载器与调度器。
+3. Engine 不承载 provider 专属解析逻辑。
+4. 取消信号必须全链路传播。
+5. 持久化失败必须可观测且不破坏收敛逻辑。
 
-1. 命令模块依赖静态契约，不要求 public 无参构造。
-2. 节点注册与节点字典更新必须原子化。
-3. 完成收敛使用信号驱动，避免固定延迟轮询。
-4. 下载器必须支持请求级超时、取消和响应体上限。
-5. 取消信号不能被静默吞掉，必须传播到调度层。
-6. 持久化失败不应破坏引擎终止收敛逻辑。
+## 8. 私有扩展流程
 
-## 8. 私有扩展标准流程
-
-1. 实现 `ILumaCommandModule` 定义 provider 子命令。
-2. 在模块中注册 `ISpider`、`IItemSink`、站点专属服务。
-3. 通过 `LumaNode` 拆分页面抓取和解析阶段。
-4. 在 `IItemSink` 中实现幂等插入与冲突处理。
-5. 通过 `IPresentationManager` 统一输出风格。
-
-## 9. 发布门禁
-
-1. `dotnet build Zeayii.Luma.sln -c Release` 通过。
-2. `dotnet test Zeayii.Luma.Tests/Zeayii.Luma.Tests.csproj -c Release` 通过。
-3. 私有 provider 子命令可被完整执行一次烟测。
-4. 取消、超时、失败三条路径有可复现验证记录。
+1. 实现 `ISpider` 返回根节点。
+2. 实现 Node 树并定义生命周期逻辑。
+3. 实现 `IItemSink` 处理入库与冲突。
+4. 在私有宿主中完成 DI 组装。

@@ -11,9 +11,7 @@ internal sealed class NullLoggerProvider : ILoggerProvider
     public ILogger CreateLogger(string categoryName) => NullLogger.Instance;
 
     /// <inheritdoc />
-    public void Dispose()
-    {
-    }
+    public void Dispose() { }
 
     /// <summary>
     /// <b>空日志器</b>
@@ -26,15 +24,13 @@ internal sealed class NullLoggerProvider : ILoggerProvider
         public static readonly NullLogger Instance = new();
 
         /// <inheritdoc />
-        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Shared;
 
         /// <inheritdoc />
         public bool IsEnabled(LogLevel logLevel) => false;
 
         /// <inheritdoc />
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-        }
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
 
         /// <summary>
         /// <b>空作用域</b>
@@ -44,12 +40,10 @@ internal sealed class NullLoggerProvider : ILoggerProvider
             /// <summary>
             /// 单例实例。
             /// </summary>
-            public static readonly NullScope Instance = new();
+            public static readonly NullScope Shared = new();
 
             /// <inheritdoc />
-            public void Dispose()
-            {
-            }
+            public void Dispose() { }
         }
     }
 }

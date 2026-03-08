@@ -95,7 +95,7 @@ internal sealed class LumaNodeState
     public void SetStatus(NodeExecutionStatus status, string reason = "")
     {
         Interlocked.Exchange(ref _status, (int)status);
-        _reason = reason ?? string.Empty;
+        _reason = reason;
     }
 
     /// <summary>
@@ -127,20 +127,28 @@ internal sealed class LumaNodeState
         switch (result.Decision)
         {
             case PersistDecision.Stored:
+            {
                 Interlocked.Increment(ref _storedCount);
                 Interlocked.Exchange(ref _consecutiveExistingCount, 0);
                 break;
+            }
             case PersistDecision.AlreadyExists:
+            {
                 Interlocked.Increment(ref _alreadyExistsCount);
                 Interlocked.Increment(ref _consecutiveExistingCount);
                 break;
+            }
             case PersistDecision.Failed:
+            {
                 Interlocked.Increment(ref _failedCount);
                 Interlocked.Exchange(ref _consecutiveExistingCount, 0);
                 break;
+            }
             default:
+            {
                 Interlocked.Exchange(ref _consecutiveExistingCount, 0);
                 break;
+            }
         }
     }
 }
