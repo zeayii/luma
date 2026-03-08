@@ -337,7 +337,7 @@ public sealed class LumaEngineResilienceTests
         };
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(NodeResult.Empty);
@@ -382,12 +382,12 @@ public sealed class LumaEngineResilienceTests
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new NodeResult
             {
-                Requests = [new LumaRequest(new Uri(_url), context.NodePath)]
+                Requests = [new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(_url)), context.NodePath)]
             });
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new NodeResult
@@ -474,7 +474,7 @@ public sealed class LumaEngineResilienceTests
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(NodeResult.Empty);
@@ -505,7 +505,7 @@ public sealed class LumaEngineResilienceTests
         public override ValueTask<NodeResult> StartAsync(LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var requests = _urls.Select(url => new LumaRequest(new Uri(url), context.NodePath)).ToArray();
+            var requests = _urls.Select(url => new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(url)), context.NodePath)).ToArray();
             return ValueTask.FromResult(new NodeResult
             {
                 Requests = requests
@@ -513,7 +513,7 @@ public sealed class LumaEngineResilienceTests
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(NodeResult.Empty);
@@ -546,17 +546,17 @@ public sealed class LumaEngineResilienceTests
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new NodeResult
             {
-                Requests = [new LumaRequest(_url, context.NodePath)]
+                Requests = [new LumaRequest(new HttpRequestMessage(HttpMethod.Get, _url), context.NodePath)]
             });
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new NodeResult
             {
-                Requests = [new LumaRequest(_url, context.NodePath)]
+                Requests = [new LumaRequest(new HttpRequestMessage(HttpMethod.Get, _url), context.NodePath)]
             });
         }
     }
@@ -602,7 +602,7 @@ public sealed class LumaEngineResilienceTests
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(NodeResult.Empty);
@@ -689,7 +689,7 @@ public sealed class LumaEngineResilienceTests
         public int DownloadCount => Volatile.Read(ref _downloadCount);
 
         /// <inheritdoc />
-        public async ValueTask<LumaResponse> DownloadAsync(LumaRequest request, LumaNodeContext context, CancellationToken cancellationToken)
+        public async ValueTask<HttpResponseMessage> DownloadAsync(LumaRequest request, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (_delay > TimeSpan.Zero)
@@ -698,7 +698,7 @@ public sealed class LumaEngineResilienceTests
             }
 
             Interlocked.Increment(ref _downloadCount);
-            return new LumaResponse(request, 200, request.Url, new Dictionary<string, string>(), ReadOnlyMemory<byte>.Empty, DateTimeOffset.UtcNow, string.Empty);
+            return new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request.HttpRequestMessage, Content = new ByteArrayContent([]) };
         }
     }
 
@@ -874,3 +874,4 @@ public sealed class LumaEngineResilienceTests
         }
     }
 }
+

@@ -30,17 +30,18 @@ internal sealed class SampleListNode : LumaNode
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        return ValueTask.FromResult(new NodeResult { Requests = [new LumaRequest(_entryUrl, context.NodePath)] });
+        return ValueTask.FromResult(new NodeResult { Requests = [new LumaRequest(new HttpRequestMessage(HttpMethod.Get, _entryUrl), context.NodePath)] });
     }
 
     /// <inheritdoc />
-    public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
+    public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(response);
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var title = response.IsSuccess ? "Example Domain" : "Request Failed";
-        return ValueTask.FromResult(new NodeResult { Items = [new SampleItem(response.FinalUrl.AbsoluteUri, title)] });
+        var title = response.IsSuccessStatusCode ? "Example Domain" : "Request Failed";
+        var url = response.RequestMessage?.RequestUri?.AbsoluteUri ?? _entryUrl.AbsoluteUri;
+        return ValueTask.FromResult(new NodeResult { Items = [new SampleItem(url, title)] });
     }
 }

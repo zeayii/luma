@@ -30,7 +30,7 @@ sequenceDiagram
     Engine->>Node: StartAsync
     Node-->>Engine: NodeResult
     Engine->>D: DownloadAsync
-    D-->>Engine: LumaResponse
+    D-->>Engine: HttpResponseMessage
     Engine->>Node: HandleResponseAsync
     Node-->>Engine: NodeResult
     Engine->>Node: ShouldPersistAsync

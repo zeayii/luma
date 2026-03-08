@@ -9,7 +9,7 @@
 1. 定义站点入口契约：`ISpider`。
 2. 定义节点生命周期基类：`LumaNode`。
 3. 定义共享模型：
-- `LumaRequest` / `LumaResponse`
+- `LumaRequest`（持有 `HttpRequestMessage`） / `HttpResponseMessage`
 - `NodeResult` / `NodeExecutionOptions`
 - `LumaNodeContext` / `LumaNodeResources`（Context 对外暴露解析与 Cookie 能力函数）
 - `PersistResult` / `PersistContext`

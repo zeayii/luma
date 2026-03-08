@@ -85,11 +85,11 @@ public abstract class LumaNode
     /// <summary>
     /// 处理响应。
     /// </summary>
-    /// <param name="response">抓取响应。</param>
+    /// <param name="response">原生 HTTP 响应。</param>
     /// <param name="context">节点上下文。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>节点处理结果。</returns>
-    public abstract ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken);
+    public abstract ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken);
 
     /// <summary>
     /// 判断数据项是否应进入持久化管道。

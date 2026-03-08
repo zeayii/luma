@@ -59,7 +59,7 @@ sequenceDiagram
     Engine->>Node: StartAsync(context)
     Node-->>Engine: NodeResult(Requests/Children/Items)
     Engine->>Downloader: DownloadAsync(request)
-    Downloader-->>Engine: LumaResponse
+    Downloader-->>Engine: HttpResponseMessage
     Engine->>Node: HandleResponseAsync(response, context)
     Node-->>Engine: NodeResult(Requests/Children/Items)
     Engine->>Node: ShouldPersistAsync(item)

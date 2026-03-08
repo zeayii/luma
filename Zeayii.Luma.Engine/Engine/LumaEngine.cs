@@ -328,11 +328,8 @@ public sealed class LumaEngine
 
         foreach (var request in result.Requests)
         {
-            var normalizedRequest = new LumaRequest(request.Url, runtime.Path)
+            var normalizedRequest = new LumaRequest(request.HttpRequestMessage, runtime.Path)
             {
-                Method = request.Method,
-                Headers = request.Headers,
-                Body = request.Body,
                 RouteKind = ResolveRouteKind(request.RouteKind),
                 Timeout = request.Timeout
             };
@@ -444,7 +441,7 @@ public sealed class LumaEngine
 
                 try
                 {
-                    var response = await _downloader.DownloadAsync(request, runtime.Context, runtime.Context.CancellationToken).ConfigureAwait(false);
+                    using var response = await _downloader.DownloadAsync(request, runtime.Context, runtime.Context.CancellationToken).ConfigureAwait(false);
                     var result = await runtime.Node.HandleResponseAsync(response, runtime.Context, runtime.Context.CancellationToken).ConfigureAwait(false);
                     await ProcessNodeResultAsync(result, runtime, runRuntime, scheduler, persistWriter, request, prioritizeRequests: false).ConfigureAwait(false);
                 }

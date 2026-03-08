@@ -71,7 +71,7 @@ sequenceDiagram
     Engine->>Node: StartAsync
     Node-->>Engine: NodeResult
     Engine->>Downloader: DownloadAsync
-    Downloader-->>Engine: LumaResponse
+    Downloader-->>Engine: HttpResponseMessage
     Engine->>Node: HandleResponseAsync
     Node-->>Engine: NodeResult
     Engine->>Node: ShouldPersistAsync

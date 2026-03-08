@@ -298,12 +298,12 @@ public sealed class LumaEngineCriticalTests
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new NodeResult
             {
-                Requests = [new LumaRequest(new Uri(url), context.NodePath)]
+                Requests = [new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(url)), context.NodePath)]
             });
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new NodeResult
@@ -367,7 +367,7 @@ public sealed class LumaEngineCriticalTests
         };
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(NodeResult.Empty);
@@ -398,7 +398,7 @@ public sealed class LumaEngineCriticalTests
         public override ValueTask<NodeResult> StartAsync(LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var requests = _urls.Select(url => new LumaRequest(new Uri(url), context.NodePath)).ToArray();
+            var requests = _urls.Select(url => new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(url)), context.NodePath)).ToArray();
             return ValueTask.FromResult(new NodeResult
             {
                 Requests = requests
@@ -406,7 +406,7 @@ public sealed class LumaEngineCriticalTests
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(NodeResult.Empty);
@@ -432,7 +432,7 @@ public sealed class LumaEngineCriticalTests
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(NodeResult.Empty);
@@ -484,7 +484,7 @@ public sealed class LumaEngineCriticalTests
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(LumaResponse response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(NodeResult.Empty);
@@ -502,11 +502,11 @@ public sealed class LumaEngineCriticalTests
         public List<string> DownloadedUrls { get; } = [];
 
         /// <inheritdoc />
-        public ValueTask<LumaResponse> DownloadAsync(LumaRequest request, LumaNodeContext context, CancellationToken cancellationToken)
+        public ValueTask<HttpResponseMessage> DownloadAsync(LumaRequest request, LumaNodeContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            DownloadedUrls.Add(request.Url.AbsoluteUri);
-            var response = new LumaResponse(request, 200, request.Url, new Dictionary<string, string>(), ReadOnlyMemory<byte>.Empty, DateTimeOffset.UtcNow, string.Empty);
+            DownloadedUrls.Add(request.HttpRequestMessage.RequestUri?.AbsoluteUri ?? string.Empty);
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request.HttpRequestMessage, Content = new ByteArrayContent([]) };
             return ValueTask.FromResult(response);
         }
     }
@@ -675,3 +675,4 @@ public sealed class LumaEngineCriticalTests
         }
     }
 }
+
