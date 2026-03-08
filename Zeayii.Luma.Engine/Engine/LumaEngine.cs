@@ -173,7 +173,10 @@ public sealed class LumaEngine<TState>
                     }
                     catch (OperationCanceledException) when (runRuntime.Token.IsCancellationRequested)
                     {
-                        runRuntime.SetStatus("Cancelled");
+                        if (!string.Equals(runRuntime.Status, "Stopped", StringComparison.Ordinal))
+                        {
+                            runRuntime.SetStatus("Cancelled");
+                        }
                     }
                     catch (Exception)
                     {
@@ -253,6 +256,10 @@ public sealed class LumaEngine<TState>
             runtime.State.SetStatus(NodeExecutionStatus.Running);
             var result = await runtime.Node.StartAsync(runtime.Context).ConfigureAwait(false);
             await ProcessNodeResultAsync(result, runtime, runRuntime, scheduler, persistWriter, sourceRequest: null, prioritizeRequests).ConfigureAwait(false);
+        }
+        catch (LumaStopException stopException)
+        {
+            await HandleStopExceptionAsync(stopException, runtime, runRuntime, "Node start phase stopped by business rule.").ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (runtime.CancellationTokenSource.IsCancellationRequested || runRuntime.Token.IsCancellationRequested)
         {
@@ -412,6 +419,10 @@ public sealed class LumaEngine<TState>
                     var result = await runtime.Node.HandleResponseAsync(response, runtime.Context).ConfigureAwait(false);
                     await ProcessNodeResultAsync(result, runtime, runRuntime, scheduler, persistWriter, request, prioritizeRequests: false).ConfigureAwait(false);
                 }
+                catch (LumaStopException stopException)
+                {
+                    await HandleStopExceptionAsync(stopException, runtime, runRuntime, "Node response phase stopped by business rule.").ConfigureAwait(false);
+                }
                 catch (OperationCanceledException) when (runtime.CancellationTokenSource.IsCancellationRequested || runRuntime.Token.IsCancellationRequested)
                 {
                 }
@@ -450,7 +461,7 @@ public sealed class LumaEngine<TState>
             while (await TryReadInitialPersistBatchItemAsync(reader, buffer).ConfigureAwait(false))
             {
                 await FillPersistBatchAsync(reader, buffer).ConfigureAwait(false);
-                await FlushPersistBatchAsync(buffer, runRuntime.Token).ConfigureAwait(false);
+                await FlushPersistBatchAsync(buffer, runRuntime, runRuntime.Token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (runRuntime.Token.IsCancellationRequested || runRuntime.CancellationTokenSource.IsCancellationRequested)
@@ -463,7 +474,7 @@ public sealed class LumaEngine<TState>
                 using var finalFlushCancellationTokenSource = CreateFinalFlushCancellationTokenSource(runRuntime.Token);
                 try
                 {
-                    await FlushPersistBatchAsync(buffer, finalFlushCancellationTokenSource.Token).ConfigureAwait(false);
+                    await FlushPersistBatchAsync(buffer, runRuntime, finalFlushCancellationTokenSource.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (finalFlushCancellationTokenSource.IsCancellationRequested)
                 {
@@ -551,10 +562,11 @@ public sealed class LumaEngine<TState>
     /// 刷新当前持久化批次。
     /// </summary>
     /// <param name="buffer">批量缓冲区。</param>
+    /// <param name="runRuntime">运行时宿主。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>异步任务。</returns>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "持久化批次失败需要转化为失败结果，不应中断整个运行。")]
-    private async Task FlushPersistBatchAsync(List<ItemEnvelope<TState>> buffer, CancellationToken cancellationToken)
+    private async Task FlushPersistBatchAsync(List<ItemEnvelope<TState>> buffer, LumaRunRuntime runRuntime, CancellationToken cancellationToken)
     {
         if (buffer.Count <= 0)
         {
@@ -575,7 +587,23 @@ public sealed class LumaEngine<TState>
             }
 
             var persistContext = new PersistContext<TState>(runtime.Context, envelope.SourceRequest, index);
-            var shouldPersist = await runtime.Node.ShouldPersistAsync(envelope.Item, persistContext).ConfigureAwait(false);
+            bool shouldPersist;
+            try
+            {
+                shouldPersist = await runtime.Node.ShouldPersistAsync(envelope.Item, persistContext).ConfigureAwait(false);
+            }
+            catch (LumaStopException stopException)
+            {
+                await HandleStopExceptionAsync(stopException, runtime, runRuntime, "Node persist filter phase stopped by business rule.").ConfigureAwait(false);
+                if (stopException.Scope != LumaStopScope.Node)
+                {
+                    throw;
+                }
+
+                resolvedResults[index] = PersistResult.Skipped(stopException.Message);
+                continue;
+            }
+
             if (!shouldPersist)
             {
                 resolvedResults[index] = PersistResult.Skipped("Filtered by node policy.");
@@ -635,7 +663,18 @@ public sealed class LumaEngine<TState>
             }
 
             var callbackContext = new PersistContext<TState>(runtime.Context, envelope.SourceRequest, index);
-            await runtime.Node.OnPersistedAsync(envelope.Item, persistResult, callbackContext).ConfigureAwait(false);
+            try
+            {
+                await runtime.Node.OnPersistedAsync(envelope.Item, persistResult, callbackContext).ConfigureAwait(false);
+            }
+            catch (LumaStopException stopException)
+            {
+                await HandleStopExceptionAsync(stopException, runtime, runRuntime, "Node persisted callback phase stopped by business rule.").ConfigureAwait(false);
+                if (stopException.Scope != LumaStopScope.Node)
+                {
+                    throw;
+                }
+            }
 
             var shouldStopByPersistSuggestion = persistResult is { Decision: PersistDecision.AlreadyExists, SuggestStopNode: true };
             var shouldStopByThreshold = persistResult.Decision == PersistDecision.AlreadyExists && runtime.Node.ConsecutiveExistingStopThreshold > 0 && runtime.State.ConsecutiveExistingCount >= runtime.Node.ConsecutiveExistingStopThreshold;
@@ -782,6 +821,47 @@ public sealed class LumaEngine<TState>
     }
 
     /// <summary>
+    /// 处理节点主动抛出的停止异常。
+    /// </summary>
+    /// <param name="exception">停止异常。</param>
+    /// <param name="runtime">节点运行时。</param>
+    /// <param name="runRuntime">运行时宿主。</param>
+    /// <param name="phase">阶段文本。</param>
+    /// <returns>异步任务。</returns>
+    private async ValueTask HandleStopExceptionAsync(LumaStopException exception, LumaNodeRuntime<TState> runtime, LumaRunRuntime runRuntime, string phase)
+    {
+        var reason = $"[{exception.Code}] {exception.Message}";
+        switch (exception.Scope)
+        {
+            case LumaStopScope.Node:
+            {
+                runtime.Cancel(reason);
+                _logManager.Write(LogLevelKind.Warning, "Engine", $"{phase} Node={runtime.Path}, Scope={exception.Scope}, Reason={reason}");
+                LumaEngineLogMessages.NodeScopedStopLog(_logger, runtime.Path, exception.Code, reason, null);
+                return;
+            }
+            case LumaStopScope.Run:
+            case LumaStopScope.App:
+            {
+                runtime.State.SetStatus(NodeExecutionStatus.Cancelled, reason);
+                runRuntime.SetStatus("Stopped");
+                if (!runRuntime.CancellationTokenSource.IsCancellationRequested)
+                {
+                    await runRuntime.CancellationTokenSource.CancelAsync().ConfigureAwait(false);
+                }
+
+                _logManager.Write(LogLevelKind.Error, "Engine", $"{phase} Node={runtime.Path}, Scope={exception.Scope}, Reason={reason}");
+                LumaEngineLogMessages.RunScopedStopLog(_logger, runtime.Path, exception.Scope.ToString(), exception.Code, reason, null);
+                return;
+            }
+            default:
+            {
+                throw new ArgumentOutOfRangeException(nameof(exception), exception.Scope, "Unknown stop scope.");
+            }
+        }
+    }
+
+    /// <summary>
     /// 周期发布进度快照。
     /// </summary>
     /// <param name="runRuntime">运行时宿主。</param>
@@ -889,4 +969,16 @@ internal static class LumaEngineLogMessages
     /// </summary>
     internal static readonly Action<ILogger, string, Exception?> DuplicateNodePathLog =
         LoggerMessage.Define<string>(LogLevel.Warning, new EventId(1007, nameof(DuplicateNodePathLog)), "Duplicate node path skipped: {NodePath}");
+
+    /// <summary>
+    /// 节点级停止日志委托。
+    /// </summary>
+    internal static readonly Action<ILogger, string, string, string, Exception?> NodeScopedStopLog =
+        LoggerMessage.Define<string, string, string>(LogLevel.Warning, new EventId(1008, nameof(NodeScopedStopLog)), "Node scoped stop triggered. Node={NodePath}, Code={Code}, Reason={Reason}");
+
+    /// <summary>
+    /// 运行级停止日志委托。
+    /// </summary>
+    internal static readonly Action<ILogger, string, string, string, string, Exception?> RunScopedStopLog =
+        LoggerMessage.Define<string, string, string, string>(LogLevel.Error, new EventId(1009, nameof(RunScopedStopLog)), "Run scoped stop triggered. Node={NodePath}, Scope={Scope}, Code={Code}, Reason={Reason}");
 }

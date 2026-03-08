@@ -98,7 +98,15 @@ sequenceDiagram
 4. Cancellation must propagate end-to-end.
 5. Persistence failures must be observable and must not break convergence.
 
-## 8. Private Extension Workflow
+## 8. Stop Semantics
+
+1. Nodes can actively request stop by throwing `LumaStopException`.
+2. `LumaStopScope.Node`: stop only the current node and its downstream subtree.
+3. `LumaStopScope.Run`: stop the current run.
+4. `LumaStopScope.App`: bubble to host so the host decides application-level shutdown.
+5. Keep `OperationCanceledException` for external cancellation (for example Ctrl+C), separated from business stop semantics.
+
+## 9. Private Extension Workflow
 
 1. Implement `ISpider<TState>` to create state and return the root node.
 2. Implement the node tree and lifecycle logic.

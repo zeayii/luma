@@ -98,7 +98,15 @@ sequenceDiagram
 4. 取消信号必须全链路传播。
 5. 持久化失败必须可观测且不破坏收敛逻辑。
 
-## 8. 私有扩展流程
+## 8. 停止语义
+
+1. Node 可通过抛出 `LumaStopException` 主动触发停止。
+2. `LumaStopScope.Node`：仅停止当前节点及其下游。
+3. `LumaStopScope.Run`：停止当前整次运行。
+4. `LumaStopScope.App`：上抛到宿主，由宿主决定应用级停机策略。
+5. `OperationCanceledException` 保留外部取消语义（例如 Ctrl+C），不与业务停止语义混用。
+
+## 9. 私有扩展流程
 
 1. 实现 `ISpider<TState>`，创建状态并返回根节点。
 2. 实现 Node 树并定义生命周期逻辑。

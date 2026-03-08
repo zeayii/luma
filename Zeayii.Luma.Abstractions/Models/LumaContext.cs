@@ -187,7 +187,6 @@ public sealed class LumaContext<TState>
         {
             exists = cookieContainer
                 .GetCookies(uri)
-                .Cast<Cookie>()
                 .Any(cookie => string.Equals(cookie.Name, name, StringComparison.Ordinal));
             return ValueTask.CompletedTask;
         }, CancellationToken).ConfigureAwait(false);
@@ -210,7 +209,6 @@ public sealed class LumaContext<TState>
         {
             var cookie = cookieContainer
                 .GetCookies(uri)
-                .Cast<Cookie>()
                 .FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.Ordinal));
             result = cookie is null ? null : CloneCookie(cookie);
             return ValueTask.CompletedTask;
@@ -232,7 +230,6 @@ public sealed class LumaContext<TState>
         {
             result = cookieContainer
                 .GetCookies(uri)
-                .Cast<Cookie>()
                 .Select(CloneCookie)
                 .ToArray();
             return ValueTask.CompletedTask;

@@ -161,6 +161,44 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
+    /// 验证节点级停止异常仅停止当前节点，不中断整次运行。
+    /// </summary>
+    [Fact]
+    public async Task RunAsyncShouldOnlyStopCurrentNodeWhenNodeScopedStopExceptionThrown()
+    {
+        var stopNode = new NodeScopedStopNode("stop-child");
+        var keepNode = new SingleItemNode("keep-child", "https://example.com/keep", new TestItem("K"));
+        var root = new ParentNode("root", ChildTraversalPolicy.Breadth, 1, stopNode, keepNode);
+        var fixture = CreateFixture();
+
+        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-node-stop-scope", CancellationToken.None).ConfigureAwait(true);
+
+        Assert.Single(fixture.ItemSink.StoredBatches);
+        var snapshot = fixture.ProgressManager.LastSnapshot;
+        Assert.NotNull(snapshot);
+        Assert.Equal("Completed", snapshot!.Status);
+        Assert.Contains(snapshot.Nodes, static nodeSnapshot => nodeSnapshot.Path == "root/stop-child" && nodeSnapshot.Status is NodeExecutionStatus.Cancelled or NodeExecutionStatus.Stopping);
+    }
+
+    /// <summary>
+    /// 验证运行级停止异常会触发全局取消并终止运行。
+    /// </summary>
+    [Fact]
+    public async Task RunAsyncShouldStopRunWhenRunScopedStopExceptionThrown()
+    {
+        var stopNode = new RunScopedStopNode("stop-run");
+        var keepNode = new SingleItemNode("keep-child", "https://example.com/keep", new TestItem("K"));
+        var root = new ParentNode("root", ChildTraversalPolicy.Breadth, 1, stopNode, keepNode);
+        var fixture = CreateFixture();
+
+        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-global-stop-scope", CancellationToken.None).ConfigureAwait(true);
+
+        var snapshot = fixture.ProgressManager.LastSnapshot;
+        Assert.NotNull(snapshot);
+        Assert.Equal("Stopped", snapshot!.Status);
+    }
+
+    /// <summary>
     /// 创建测试夹具。
     /// </summary>
     /// <param name="options">引擎配置。</param>
@@ -609,6 +647,46 @@ public sealed class LumaEngineResilienceTests
             CookieValue = cookie?.Value ?? string.Empty;
 
             return NodeResult<TestState>.Empty;
+        }
+
+        /// <inheritdoc />
+        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(NodeResult<TestState>.Empty);
+        }
+    }
+
+    /// <summary>
+    /// 节点级停止测试节点。
+    /// </summary>
+    private sealed class NodeScopedStopNode(string key) : LumaNode<TestState>(key)
+    {
+        /// <inheritdoc />
+        public override ValueTask<NodeResult<TestState>> StartAsync(LumaContext<TestState> context)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            throw new LumaStopException(LumaStopScope.Node, "NodeBusinessStop", "Node scoped stop requested.");
+        }
+
+        /// <inheritdoc />
+        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(NodeResult<TestState>.Empty);
+        }
+    }
+
+    /// <summary>
+    /// 运行级停止测试节点。
+    /// </summary>
+    private sealed class RunScopedStopNode(string key) : LumaNode<TestState>(key)
+    {
+        /// <inheritdoc />
+        public override ValueTask<NodeResult<TestState>> StartAsync(LumaContext<TestState> context)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            throw new LumaStopException(LumaStopScope.Run, "RunBusinessStop", "Run scoped stop requested.");
         }
 
         /// <inheritdoc />
