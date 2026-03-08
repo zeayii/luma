@@ -86,7 +86,7 @@ public sealed class LumaNodeContext
     /// <param name="routeKind">路由类型。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>异步任务。</returns>
-    public ValueTask SetCookieAsync(Uri uri, Cookie cookie, LumaRouteKind routeKind = LumaRouteKind.Direct, CancellationToken cancellationToken = default)
+    public ValueTask SetCookieAsync(Uri uri, Cookie cookie, LumaRouteKind routeKind = LumaRouteKind.Auto, CancellationToken cancellationToken = default)
         => _resources.SetCookieAsync(uri, cookie, routeKind, cancellationToken);
 
     /// <summary>
@@ -97,7 +97,7 @@ public sealed class LumaNodeContext
     /// <param name="routeKind">路由类型。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>异步任务。</returns>
-    public ValueTask SetCookiesAsync(Uri uri, IEnumerable<Cookie> cookies, LumaRouteKind routeKind = LumaRouteKind.Direct, CancellationToken cancellationToken = default)
+    public ValueTask SetCookiesAsync(Uri uri, IEnumerable<Cookie> cookies, LumaRouteKind routeKind = LumaRouteKind.Auto, CancellationToken cancellationToken = default)
         => _resources.SetCookiesAsync(uri, cookies, routeKind, cancellationToken);
 
     /// <summary>
@@ -108,7 +108,7 @@ public sealed class LumaNodeContext
     /// <param name="routeKind">路由类型。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>存在返回 true。</returns>
-    public ValueTask<bool> ContainsCookieAsync(Uri uri, string name, LumaRouteKind routeKind = LumaRouteKind.Direct, CancellationToken cancellationToken = default)
+    public ValueTask<bool> ContainsCookieAsync(Uri uri, string name, LumaRouteKind routeKind = LumaRouteKind.Auto, CancellationToken cancellationToken = default)
         => _resources.ContainsCookieAsync(uri, name, routeKind, cancellationToken);
 
     /// <summary>
@@ -119,7 +119,7 @@ public sealed class LumaNodeContext
     /// <param name="routeKind">路由类型。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>命中的 Cookie，未命中返回 null。</returns>
-    public ValueTask<Cookie?> GetCookieAsync(Uri uri, string name, LumaRouteKind routeKind = LumaRouteKind.Direct, CancellationToken cancellationToken = default)
+    public ValueTask<Cookie?> GetCookieAsync(Uri uri, string name, LumaRouteKind routeKind = LumaRouteKind.Auto, CancellationToken cancellationToken = default)
         => _resources.GetCookieAsync(uri, name, routeKind, cancellationToken);
 
     /// <summary>
@@ -129,7 +129,7 @@ public sealed class LumaNodeContext
     /// <param name="routeKind">路由类型。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>Cookie 快照集合。</returns>
-    public ValueTask<IReadOnlyList<Cookie>> GetCookiesAsync(Uri uri, LumaRouteKind routeKind = LumaRouteKind.Direct, CancellationToken cancellationToken = default)
+    public ValueTask<IReadOnlyList<Cookie>> GetCookiesAsync(Uri uri, LumaRouteKind routeKind = LumaRouteKind.Auto, CancellationToken cancellationToken = default)
         => _resources.GetCookiesAsync(uri, routeKind, cancellationToken);
 
     /// <summary>
@@ -140,7 +140,7 @@ public sealed class LumaNodeContext
     /// <param name="routeKind">路由类型。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>异步任务。</returns>
-    public ValueTask RemoveCookieAsync(Uri uri, string name, LumaRouteKind routeKind = LumaRouteKind.Direct, CancellationToken cancellationToken = default)
+    public ValueTask RemoveCookieAsync(Uri uri, string name, LumaRouteKind routeKind = LumaRouteKind.Auto, CancellationToken cancellationToken = default)
         => _resources.RemoveCookieAsync(uri, name, routeKind, cancellationToken);
 
     /// <summary>
@@ -150,6 +150,6 @@ public sealed class LumaNodeContext
     /// <param name="routeKind">路由类型。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>异步任务。</returns>
-    public ValueTask ClearCookiesAsync(Uri uri, LumaRouteKind routeKind = LumaRouteKind.Direct, CancellationToken cancellationToken = default)
+    public ValueTask ClearCookiesAsync(Uri uri, LumaRouteKind routeKind = LumaRouteKind.Auto, CancellationToken cancellationToken = default)
         => _resources.ClearCookiesAsync(uri, routeKind, cancellationToken);
 }

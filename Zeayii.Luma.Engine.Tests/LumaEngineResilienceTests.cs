@@ -30,7 +30,7 @@ public sealed class LumaEngineResilienceTests
         using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromMilliseconds(120));
 
         var runTask = engine.RunAsync(new StaticSpider(node), "test-command", "run-cancel", cancellationTokenSource.Token);
-        var completedTask = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(3))).ConfigureAwait(true);
+        var completedTask = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(3), cancellationTokenSource.Token)).ConfigureAwait(true);
 
         Assert.Same(runTask, completedTask);
         await runTask.ConfigureAwait(true);
@@ -46,6 +46,7 @@ public sealed class LumaEngineResilienceTests
         var node = new SingleItemNode("root", "https://example.com/final-flush", new TestItem("A"));
         var fixture = CreateFixture(options: new LumaEngineOptions
         {
+            DefaultRouteKind = LumaRouteKind.Direct,
             DownloadWorkerCount = 1,
             PersistWorkerCount = 1,
             RequestChannelCapacity = 16,
@@ -90,6 +91,7 @@ public sealed class LumaEngineResilienceTests
         var fixture = CreateFixture(
             options: new LumaEngineOptions
             {
+                DefaultRouteKind = LumaRouteKind.Direct,
                 DownloadWorkerCount = 1,
                 PersistWorkerCount = 1,
                 RequestChannelCapacity = 1,
@@ -119,7 +121,7 @@ public sealed class LumaEngineResilienceTests
 
         var snapshot = fixture.ProgressManager.LastSnapshot;
         Assert.NotNull(snapshot);
-        Assert.Contains(snapshot!.Nodes, static s => s.Path == "root" && s.Status is NodeExecutionStatus.Cancelled or NodeExecutionStatus.Stopping);
+        Assert.Contains(snapshot!.Nodes, static s => s is { Path: "root", Status: NodeExecutionStatus.Cancelled or NodeExecutionStatus.Stopping });
     }
 
     /// <summary>
@@ -131,9 +133,9 @@ public sealed class LumaEngineResilienceTests
         var node = new SingleItemNode("root", "https://example.com/mismatch", new TestItem("M"));
         var fixture = CreateFixture(storeBehavior: static _ => Array.Empty<PersistResult>());
 
-        var action = async () => await fixture.CreateEngine().RunAsync(new StaticSpider(node), "test-command", "run-mismatch", CancellationToken.None).ConfigureAwait(true);
+        async Task Action() => await fixture.CreateEngine().RunAsync(new StaticSpider(node), "test-command", "run-mismatch", CancellationToken.None).ConfigureAwait(true);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(action).ConfigureAwait(true);
+        await Assert.ThrowsAsync<InvalidOperationException>(Action).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -167,6 +169,7 @@ public sealed class LumaEngineResilienceTests
     {
         var resolvedOptions = options ?? new LumaEngineOptions
         {
+            DefaultRouteKind = LumaRouteKind.Direct,
             DownloadWorkerCount = 2,
             PersistWorkerCount = 1,
             RequestChannelCapacity = 64,
@@ -244,7 +247,7 @@ public sealed class LumaEngineResilienceTests
         /// <summary>
         /// 日志管理器。
         /// </summary>
-        public FakeLogManager LogManager { get; }
+        private FakeLogManager LogManager { get; }
 
         /// <summary>
         /// 进度管理器。
@@ -254,7 +257,7 @@ public sealed class LumaEngineResilienceTests
         /// <summary>
         /// 网络客户端。
         /// </summary>
-        public FakeNetClient NetClient { get; }
+        private FakeNetClient NetClient { get; }
 
         /// <summary>
         /// 创建引擎。

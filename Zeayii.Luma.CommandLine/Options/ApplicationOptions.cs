@@ -1,6 +1,7 @@
 using Infrastructure.Net.Http.Configuration.Policies;
 using Infrastructure.Net.Http.Logging;
 using Microsoft.Extensions.Logging;
+using Zeayii.Luma.Abstractions.Models;
 
 namespace Zeayii.Luma.CommandLine.Options;
 
@@ -116,6 +117,11 @@ internal sealed class ApplicationOptions
     /// 代理地址原始值列表。
     /// </summary>
     public required IReadOnlyList<string> Proxies { get; init; }
+
+    /// <summary>
+    /// 默认路由类型。
+    /// </summary>
+    public required LumaRouteKind DefaultRouteKind { get; init; }
 
     /// <summary>
     /// 是否启用重试。
@@ -247,4 +253,3 @@ internal sealed class ApplicationOptions
     /// </summary>
     public required int HealthCheckFailureThreshold { get; init; }
 }
-

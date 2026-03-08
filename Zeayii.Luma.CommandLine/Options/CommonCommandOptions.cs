@@ -2,6 +2,7 @@ using System.CommandLine;
 using Infrastructure.Net.Http.Configuration.Policies;
 using Infrastructure.Net.Http.Logging;
 using Microsoft.Extensions.Logging;
+using Zeayii.Luma.Abstractions.Models;
 
 namespace Zeayii.Luma.CommandLine.Options;
 
@@ -109,6 +110,11 @@ internal sealed class CommonCommandOptions
     /// 代理列表参数。
     /// </summary>
     public required Option<string[]> ProxiesOption { get; init; }
+
+    /// <summary>
+    /// 默认路由参数。
+    /// </summary>
+    public required Option<LumaRouteKind> DefaultRouteKindOption { get; init; }
 
     /// <summary>
     /// 重试开关参数。
@@ -240,4 +246,3 @@ internal sealed class CommonCommandOptions
     /// </summary>
     public required Option<int> HealthCheckFailureThresholdOption { get; init; }
 }
-

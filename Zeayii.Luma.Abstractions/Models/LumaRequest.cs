@@ -24,6 +24,7 @@ public sealed class LumaRequest
         NodePath = string.IsNullOrWhiteSpace(nodePath) ? throw new ArgumentNullException(nameof(nodePath)) : nodePath;
         Method = HttpMethod.Get;
         Headers = EmptyHeaders;
+        RouteKind = LumaRouteKind.Auto;
     }
 
     /// <summary>

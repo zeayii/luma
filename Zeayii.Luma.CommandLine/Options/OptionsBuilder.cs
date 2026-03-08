@@ -1,8 +1,9 @@
+using System.Net;
+using Infrastructure.Net.Http.Configuration;
+using Infrastructure.Net.Http.Configuration.Policies;
+using Zeayii.Luma.Abstractions.Models;
 using Zeayii.Luma.Engine.Configuration;
 using Zeayii.Luma.Presentation.Configuration;
-using global::Infrastructure.Net.Http.Configuration;
-using global::Infrastructure.Net.Http.Configuration.Policies;
-using Microsoft.Extensions.Logging;
 
 namespace Zeayii.Luma.CommandLine.Options;
 
@@ -17,16 +18,18 @@ internal static class OptionsBuilder
     public static LumaEngineOptions BuildEngineOptions(ApplicationOptions applicationOptions)
     {
         ArgumentNullException.ThrowIfNull(applicationOptions);
+        var resolvedDefaultRouteKind = ResolveDefaultRouteKind(applicationOptions);
         return new LumaEngineOptions
         {
-            DownloadWorkerCount = Math.Max(1, applicationOptions.DownloadWorkerCount),
-            PersistWorkerCount = Math.Max(1, applicationOptions.PersistWorkerCount),
-            RequestChannelCapacity = Math.Max(32, applicationOptions.RequestChannelCapacity),
-            PersistChannelCapacity = Math.Max(32, applicationOptions.PersistChannelCapacity),
-            PersistBatchSize = Math.Max(1, applicationOptions.PersistBatchSize),
-            PersistFlushInterval = TimeSpan.FromMilliseconds(Math.Max(1, applicationOptions.PersistFlushIntervalMilliseconds)),
-            PresentationRefreshInterval = TimeSpan.FromMilliseconds(Math.Max(50, applicationOptions.RefreshIntervalMilliseconds)),
-            MaxResponseBodyBytes = Math.Max(8 * 1024, applicationOptions.MaxResponseBodyBytes)
+            DefaultRouteKind = resolvedDefaultRouteKind,
+            DownloadWorkerCount = applicationOptions.DownloadWorkerCount,
+            PersistWorkerCount = applicationOptions.PersistWorkerCount,
+            RequestChannelCapacity = applicationOptions.RequestChannelCapacity,
+            PersistChannelCapacity = applicationOptions.PersistChannelCapacity,
+            PersistBatchSize = applicationOptions.PersistBatchSize,
+            PersistFlushInterval = TimeSpan.FromMilliseconds(applicationOptions.PersistFlushIntervalMilliseconds),
+            PresentationRefreshInterval = TimeSpan.FromMilliseconds(applicationOptions.RefreshIntervalMilliseconds),
+            MaxResponseBodyBytes = applicationOptions.MaxResponseBodyBytes
         };
     }
 
@@ -40,8 +43,8 @@ internal static class OptionsBuilder
         {
             HeaderBrand = applicationOptions.HeaderBrand,
             MinimumLogLevel = applicationOptions.ConsoleLogLevel,
-            MaxLogEntries = Math.Max(100, applicationOptions.MaxLogEntries),
-            RefreshInterval = TimeSpan.FromMilliseconds(Math.Max(50, applicationOptions.RefreshIntervalMilliseconds))
+            MaxLogEntries = applicationOptions.MaxLogEntries,
+            RefreshInterval = TimeSpan.FromMilliseconds(applicationOptions.RefreshIntervalMilliseconds)
         };
     }
 
@@ -53,10 +56,7 @@ internal static class OptionsBuilder
         ArgumentNullException.ThrowIfNull(applicationOptions);
 
         var proxies = applicationOptions.Proxies
-            .Where(static value => !string.IsNullOrWhiteSpace(value))
-            .Select(static value => Uri.TryCreate(value, UriKind.Absolute, out var uri) ? uri : null)
-            .Where(static value => value is not null)
-            .Cast<Uri>()
+            .Select(static value => new Uri(value, UriKind.Absolute))
             .Distinct()
             .ToArray();
 
@@ -64,23 +64,23 @@ internal static class OptionsBuilder
         {
             MinimumLogLevel = applicationOptions.NetLogLevel,
             Proxies = proxies,
-            DefaultTimeout = TimeSpan.FromSeconds(Math.Max(1, applicationOptions.DefaultTimeoutSeconds)),
+            DefaultTimeout = TimeSpan.FromSeconds(applicationOptions.DefaultTimeoutSeconds),
             DefaultHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
-            DefaultCookies = Array.Empty<System.Net.Cookie>(),
+            DefaultCookies = Array.Empty<Cookie>(),
             RetryPolicy = new RetryPolicy
             {
                 Enabled = applicationOptions.RetryEnabled,
-                MaxAttempts = Math.Max(0, applicationOptions.RetryMaxAttempts),
+                MaxAttempts = applicationOptions.RetryMaxAttempts,
                 DelayMode = applicationOptions.RetryDelayMode,
-                BaseDelay = TimeSpan.FromMilliseconds(Math.Max(0, applicationOptions.RetryBaseDelayMilliseconds)),
-                MaxDelay = TimeSpan.FromMilliseconds(Math.Max(0, applicationOptions.RetryMaxDelayMilliseconds)),
+                BaseDelay = TimeSpan.FromMilliseconds(applicationOptions.RetryBaseDelayMilliseconds),
+                MaxDelay = TimeSpan.FromMilliseconds(applicationOptions.RetryMaxDelayMilliseconds),
                 IdempotentOnly = applicationOptions.RetryIdempotentOnly,
                 FailurePolicy = applicationOptions.RetryFailurePolicy
             },
             RedirectPolicy = new RedirectPolicy
             {
                 Enabled = applicationOptions.RedirectEnabled,
-                MaxRedirects = Math.Max(0, applicationOptions.RedirectMaxRedirects),
+                MaxRedirects = applicationOptions.RedirectMaxRedirects,
                 AllowHttpsToHttp = applicationOptions.AllowHttpsToHttp,
                 MethodRewriteMode = applicationOptions.RedirectMethodRewriteMode
             },
@@ -96,28 +96,43 @@ internal static class OptionsBuilder
             RequestPacingPolicy = new RequestPacingPolicy
             {
                 Enabled = applicationOptions.RequestPacingEnabled,
-                MinInterval = TimeSpan.FromMilliseconds(Math.Max(0, applicationOptions.RequestPacingMinIntervalMilliseconds))
+                MinInterval = TimeSpan.FromMilliseconds(applicationOptions.RequestPacingMinIntervalMilliseconds)
             },
             CircuitBreakerPolicy = new CircuitBreakerPolicy
             {
                 Enabled = applicationOptions.CircuitBreakerEnabled,
-                FailureThreshold = Math.Max(1, applicationOptions.CircuitBreakerFailureThreshold),
-                BreakDuration = TimeSpan.FromMilliseconds(Math.Max(1, applicationOptions.CircuitBreakerBreakDurationMilliseconds))
+                FailureThreshold = applicationOptions.CircuitBreakerFailureThreshold,
+                BreakDuration = TimeSpan.FromMilliseconds(applicationOptions.CircuitBreakerBreakDurationMilliseconds)
             },
             RateLimitPolicy = new RateLimitPolicy
             {
                 Enabled = applicationOptions.RateLimitEnabled,
-                GlobalRequestsPerSecond = Math.Max(0, applicationOptions.GlobalRequestsPerSecond),
-                PerEgressRequestsPerSecond = Math.Max(0, applicationOptions.PerEgressRequestsPerSecond)
+                GlobalRequestsPerSecond = applicationOptions.GlobalRequestsPerSecond,
+                PerEgressRequestsPerSecond = applicationOptions.PerEgressRequestsPerSecond
             },
             HealthCheckPolicy = new HealthCheckPolicy
             {
                 Enabled = applicationOptions.HealthCheckEnabled,
-                Interval = TimeSpan.FromMilliseconds(Math.Max(1, applicationOptions.HealthCheckIntervalMilliseconds)),
-                Timeout = TimeSpan.FromMilliseconds(Math.Max(1, applicationOptions.HealthCheckTimeoutMilliseconds)),
-                FailureThreshold = Math.Max(1, applicationOptions.HealthCheckFailureThreshold)
+                Interval = TimeSpan.FromMilliseconds(applicationOptions.HealthCheckIntervalMilliseconds),
+                Timeout = TimeSpan.FromMilliseconds(applicationOptions.HealthCheckTimeoutMilliseconds),
+                FailureThreshold = applicationOptions.HealthCheckFailureThreshold
             }
         };
     }
-}
 
+    /// <summary>
+    /// 解析默认路由类型。
+    /// </summary>
+    /// <param name="applicationOptions">应用参数。</param>
+    /// <returns>最终默认路由类型。</returns>
+    private static LumaRouteKind ResolveDefaultRouteKind(ApplicationOptions applicationOptions)
+    {
+        if (applicationOptions.DefaultRouteKind != LumaRouteKind.Auto)
+        {
+            return applicationOptions.DefaultRouteKind;
+        }
+
+        var hasProxy = applicationOptions.Proxies.Count > 0;
+        return hasProxy ? LumaRouteKind.Proxy : LumaRouteKind.Direct;
+    }
+}

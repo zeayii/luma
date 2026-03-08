@@ -333,7 +333,7 @@ public sealed class LumaEngine
                 Method = request.Method,
                 Headers = request.Headers,
                 Body = request.Body,
-                RouteKind = request.RouteKind,
+                RouteKind = ResolveRouteKind(request.RouteKind),
                 Timeout = request.Timeout
             };
 
@@ -790,9 +790,25 @@ public sealed class LumaEngine
     private async ValueTask ExecuteCookieContainerAsync(LumaRouteKind routeKind, Func<CookieContainer, CancellationToken, ValueTask> action, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(action);
-        var netRouteKind = routeKind == LumaRouteKind.Proxy ? NetRouteKind.Proxy : NetRouteKind.Direct;
+        var resolvedRouteKind = ResolveRouteKind(routeKind);
+        var netRouteKind = resolvedRouteKind == LumaRouteKind.Proxy ? NetRouteKind.Proxy : NetRouteKind.Direct;
         await using var lease = await _netClient.RentAsync(netRouteKind, cancellationToken).ConfigureAwait(false);
         await action(lease.CookieContainer, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 解析请求路由类型。
+    /// </summary>
+    /// <param name="routeKind">原始路由类型。</param>
+    /// <returns>最终路由类型。</returns>
+    private LumaRouteKind ResolveRouteKind(LumaRouteKind routeKind)
+    {
+        if (routeKind != LumaRouteKind.Auto)
+        {
+            return routeKind;
+        }
+
+        return _options.DefaultRouteKind == LumaRouteKind.Proxy ? LumaRouteKind.Proxy : LumaRouteKind.Direct;
     }
 
     /// <summary>

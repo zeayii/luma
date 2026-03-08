@@ -2,6 +2,7 @@ using System.CommandLine;
 using Infrastructure.Net.Http.Configuration.Policies;
 using Infrastructure.Net.Http.Logging;
 using Microsoft.Extensions.Logging;
+using Zeayii.Luma.Abstractions.Models;
 
 namespace Zeayii.Luma.CommandLine.Options;
 
@@ -44,6 +45,7 @@ internal static class CommonCommandOptionsBuilder
             MaxResponseBodyBytesOption = CreateOption("--max-response-body-bytes", "单响应体最大字节数。", 4 * 1024 * 1024),
             DefaultTimeoutSecondsOption = CreateOption("--default-timeout-seconds", "默认请求超时（秒）。", 30),
             ProxiesOption = CreateOption("--proxy", "代理地址列表，可重复传入。", Array.Empty<string>()),
+            DefaultRouteKindOption = CreateOption("--default-route", "默认路由类型（Auto/Direct/Proxy）。", LumaRouteKind.Auto),
             RetryEnabledOption = CreateOption("--retry-enabled", "是否启用重试。", true),
             RetryMaxAttemptsOption = CreateOption("--retry-max-attempts", "最大重试次数。", 2),
             RetryDelayModeOption = CreateOption("--retry-delay-mode", "重试退避模式。", RetryDelayMode.ExponentialWithJitter),
@@ -72,6 +74,61 @@ internal static class CommonCommandOptionsBuilder
             HealthCheckFailureThresholdOption = CreateOption("--health-check-failure-threshold", "健康检查失败阈值。", 2)
         };
 
+        options.ProxiesOption.Validators.Add(result =>
+        {
+            var values = result.GetValue(options.ProxiesOption) ?? Array.Empty<string>();
+            foreach (var value in values)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    result.AddError("--proxy does not allow empty or whitespace values.");
+                    return;
+                }
+
+                if (!Uri.TryCreate(value, UriKind.Absolute, out _))
+                {
+                    result.AddError($"Invalid proxy URI: {value}");
+                    return;
+                }
+            }
+        });
+
+        ValidateMinimum(options.LogRetentionDaysOption, 1, "--log-retention-days");
+        ValidateMinimum(options.LogTotalSizeMegabytesOption, 1, "--log-total-size-mb");
+        ValidateMinimum(options.LogFileSizeMegabytesOption, 1, "--log-file-size-mb");
+        ValidateMinimum(options.MaxLogEntriesOption, 100, "--max-log-entries");
+        ValidateMinimum(options.RefreshIntervalMillisecondsOption, 50, "--refresh-interval-ms");
+        ValidateMinimum(options.DownloadWorkerCountOption, 1, "--download-workers");
+        ValidateMinimum(options.PersistWorkerCountOption, 1, "--persist-workers");
+        ValidateMinimum(options.RequestChannelCapacityOption, 32, "--request-channel-capacity");
+        ValidateMinimum(options.PersistChannelCapacityOption, 32, "--persist-channel-capacity");
+        ValidateMinimum(options.PersistBatchSizeOption, 1, "--persist-batch-size");
+        ValidateMinimum(options.PersistFlushIntervalMillisecondsOption, 1, "--persist-flush-interval-ms");
+        ValidateMinimum(options.MaxResponseBodyBytesOption, 8 * 1024, "--max-response-body-bytes");
+        ValidateMinimum(options.DefaultTimeoutSecondsOption, 1, "--default-timeout-seconds");
+        ValidateMinimum(options.RetryMaxAttemptsOption, 0, "--retry-max-attempts");
+        ValidateMinimum(options.RetryBaseDelayMillisecondsOption, 0, "--retry-base-delay-ms");
+        ValidateMinimum(options.RetryMaxDelayMillisecondsOption, 0, "--retry-max-delay-ms");
+        ValidateMinimum(options.RedirectMaxRedirectsOption, 0, "--redirect-max-redirects");
+        ValidateMinimum(options.RequestPacingMinIntervalMillisecondsOption, 0, "--request-pacing-min-interval-ms");
+        ValidateMinimum(options.CircuitBreakerFailureThresholdOption, 1, "--circuit-breaker-failure-threshold");
+        ValidateMinimum(options.CircuitBreakerBreakDurationMillisecondsOption, 1, "--circuit-breaker-break-duration-ms");
+        ValidateMinimum(options.GlobalRequestsPerSecondOption, 0, "--global-rps");
+        ValidateMinimum(options.PerEgressRequestsPerSecondOption, 0, "--per-egress-rps");
+        ValidateMinimum(options.HealthCheckIntervalMillisecondsOption, 1, "--health-check-interval-ms");
+        ValidateMinimum(options.HealthCheckTimeoutMillisecondsOption, 1, "--health-check-timeout-ms");
+        ValidateMinimum(options.HealthCheckFailureThresholdOption, 1, "--health-check-failure-threshold");
+
+        command.Validators.Add(result =>
+        {
+            var retryBaseDelayMilliseconds = result.GetValue(options.RetryBaseDelayMillisecondsOption);
+            var retryMaxDelayMilliseconds = result.GetValue(options.RetryMaxDelayMillisecondsOption);
+            if (retryMaxDelayMilliseconds < retryBaseDelayMilliseconds)
+            {
+                result.AddError("--retry-max-delay-ms must be greater than or equal to --retry-base-delay-ms.");
+            }
+        });
+
         Add(command, options.RunNameOption);
         Add(command, options.LogDirectoryOption);
         Add(command, options.ConsoleLogLevelOption);
@@ -92,6 +149,7 @@ internal static class CommonCommandOptionsBuilder
         Add(command, options.MaxResponseBodyBytesOption);
         Add(command, options.DefaultTimeoutSecondsOption);
         Add(command, options.ProxiesOption);
+        Add(command, options.DefaultRouteKindOption);
         Add(command, options.RetryEnabledOption);
         Add(command, options.RetryMaxAttemptsOption);
         Add(command, options.RetryDelayModeOption);
@@ -157,6 +215,7 @@ internal static class CommonCommandOptionsBuilder
             MaxResponseBodyBytes = parseResult.GetValue(options.MaxResponseBodyBytesOption),
             DefaultTimeoutSeconds = parseResult.GetValue(options.DefaultTimeoutSecondsOption),
             Proxies = parseResult.GetValue(options.ProxiesOption) ?? Array.Empty<string>(),
+            DefaultRouteKind = parseResult.GetValue(options.DefaultRouteKindOption),
             RetryEnabled = parseResult.GetValue(options.RetryEnabledOption),
             RetryMaxAttempts = parseResult.GetValue(options.RetryMaxAttemptsOption),
             RetryDelayMode = parseResult.GetValue(options.RetryDelayModeOption),
@@ -207,5 +266,24 @@ internal static class CommonCommandOptionsBuilder
         ArgumentNullException.ThrowIfNull(option);
         command.Options.Add(option);
     }
-}
 
+    /// <summary>
+    /// 为整数选项添加最小值校验规则。
+    /// </summary>
+    /// <param name="option">需要校验的选项。</param>
+    /// <param name="minimum">允许的最小值。</param>
+    /// <param name="alias">选项别名。</param>
+    private static void ValidateMinimum(Option<int> option, int minimum, string alias)
+    {
+        ArgumentNullException.ThrowIfNull(option);
+        ArgumentNullException.ThrowIfNull(alias);
+        option.Validators.Add(result =>
+        {
+            var value = result.GetValue(option);
+            if (value < minimum)
+            {
+                result.AddError($"{alias} must be greater than or equal to {minimum}.");
+            }
+        });
+    }
+}

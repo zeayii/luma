@@ -9,13 +9,18 @@ namespace Zeayii.Luma.Abstractions.Models;
 public enum LumaRouteKind
 {
     /// <summary>
+    /// 自动路由（由引擎根据默认策略解析为直连或代理）。
+    /// </summary>
+    Auto = 0,
+
+    /// <summary>
     /// 直连出口。
     /// </summary>
-    Direct = 0,
+    Direct = 1,
 
     /// <summary>
     /// 代理出口。
     /// </summary>
-    Proxy = 1
+    Proxy = 2
 }
 

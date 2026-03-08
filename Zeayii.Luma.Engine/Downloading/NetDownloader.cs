@@ -21,7 +21,8 @@ public sealed class NetDownloader(INetClient netClient, LumaEngineOptions option
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
 
-        var routeKind = request.RouteKind == LumaRouteKind.Proxy ? NetRouteKind.Proxy : NetRouteKind.Direct;
+        var effectiveRouteKind = request.RouteKind == LumaRouteKind.Auto ? options.DefaultRouteKind : request.RouteKind;
+        var routeKind = effectiveRouteKind == LumaRouteKind.Proxy ? NetRouteKind.Proxy : NetRouteKind.Direct;
         await using var lease = await netClient.RentAsync(routeKind, cancellationToken).ConfigureAwait(false);
         using var timeoutCancellationTokenSource = CreateTimeoutCancellationTokenSource(request, cancellationToken);
         var effectiveCancellationToken = timeoutCancellationTokenSource?.Token ?? cancellationToken;

@@ -1,3 +1,5 @@
+using Zeayii.Luma.Abstractions.Models;
+
 namespace Zeayii.Luma.Engine.Configuration;
 
 /// <summary>
@@ -5,6 +7,14 @@ namespace Zeayii.Luma.Engine.Configuration;
 /// </summary>
 public sealed class LumaEngineOptions
 {
+    /// <summary>
+    /// 默认请求路由类型。
+    /// <para>
+    /// 当请求/资源操作使用 <see cref="LumaRouteKind.Auto"/> 时，按该策略解析为直连或代理。
+    /// </para>
+    /// </summary>
+    public required LumaRouteKind DefaultRouteKind { get; init; }
+
     /// <summary>
     /// 下载工作线程数量。
     /// </summary>

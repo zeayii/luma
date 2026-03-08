@@ -164,6 +164,7 @@ public sealed class LumaEngineCriticalTests
     {
         return new LumaEngineOptions
         {
+            DefaultRouteKind = LumaRouteKind.Direct,
             DownloadWorkerCount = 1,
             PersistWorkerCount = 1,
             RequestChannelCapacity = 64,
