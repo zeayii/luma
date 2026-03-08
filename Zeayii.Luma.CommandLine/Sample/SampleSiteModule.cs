@@ -1,6 +1,7 @@
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.CommandLine;
 using Zeayii.Luma.CommandLine.Infrastructure;
+using Zeayii.Luma.Engine.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics.CodeAnalysis;
 
@@ -22,7 +23,7 @@ public sealed class SampleSiteModule : ILumaCommandModule
     public static void ConfigureServices(IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
-        services.AddSingleton<IItemSink, MemoryItemSink>();
-        services.AddSingleton<ISpider, SampleSpider>();
+        services.AddSingleton<IItemSink<SampleState>, MemoryItemSink>();
+        services.AddLumaSpider<SampleState, SampleSpider>();
     }
 }

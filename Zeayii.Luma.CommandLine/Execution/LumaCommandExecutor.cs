@@ -2,12 +2,12 @@ using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.CommandLine;
 using Zeayii.Luma.CommandLine.Logging;
 using Zeayii.Luma.CommandLine.Options;
-using Zeayii.Luma.Engine.Engine;
 using Zeayii.Luma.Engine.Extensions;
 using Zeayii.Luma.Presentation.Extensions;
 using global::Infrastructure.Net.Http.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Linq;
 
 namespace Zeayii.Luma.CommandLine.Execution;
 
@@ -42,7 +42,6 @@ internal static class LumaCommandExecutor
         });
 
         TModule.ConfigureServices(services);
-
         using var serviceProvider = services.BuildServiceProvider();
         var logManager = serviceProvider.GetRequiredService<ILogManager>();
         if (!string.IsNullOrWhiteSpace(fileLoggerProviderResult.WarningMessage))
@@ -51,15 +50,14 @@ internal static class LumaCommandExecutor
             logManager.Write(Zeayii.Luma.Abstractions.Models.LogLevelKind.Warning, "Logging", fileLoggerProviderResult.WarningMessage);
         }
 
-        var engine = serviceProvider.GetRequiredService<LumaEngine>();
-        var spider = serviceProvider.GetRequiredService<ISpider>();
+        var siteRunner = ResolveSiteRunner(serviceProvider);
         var presentation = serviceProvider.GetRequiredService<IPresentationManager>();
         using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var presentationTask = presentation.RunAsync(linkedCancellationTokenSource.Token);
 
         try
         {
-            await engine.RunAsync(spider, applicationOptions.CommandName, applicationOptions.RunName, linkedCancellationTokenSource.Token).ConfigureAwait(false);
+            await siteRunner.RunAsync(applicationOptions.CommandName, applicationOptions.RunName, linkedCancellationTokenSource.Token).ConfigureAwait(false);
             await presentation.StopAsync().ConfigureAwait(false);
             await presentationTask.ConfigureAwait(false);
             return 0;
@@ -70,5 +68,22 @@ internal static class LumaCommandExecutor
             await linkedCancellationTokenSource.CancelAsync().ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <summary>
+    /// 解析站点模块注册的运行器。
+    /// </summary>
+    /// <param name="serviceProvider">服务容器。</param>
+    /// <returns>站点运行器。</returns>
+    private static ILumaSiteRunner ResolveSiteRunner(IServiceProvider serviceProvider)
+    {
+        ArgumentNullException.ThrowIfNull(serviceProvider);
+        var runners = serviceProvider.GetServices<ILumaSiteRunner>().ToArray();
+        return runners.Length switch
+        {
+            1 => runners[0],
+            0 => throw new InvalidOperationException("No ILumaSiteRunner registration found."),
+            _ => throw new InvalidOperationException("Multiple ILumaSiteRunner registrations found. Exactly one site runner is required.")
+        };
     }
 }

@@ -13,15 +13,19 @@ namespace Zeayii.Luma.Engine.Downloading;
 /// <param name="netClient">网络客户端入口。</param>
 /// <param name="options">引擎运行配置。</param>
 [SuppressMessage("Reliability", "CA2007:Do not directly await a Task", Justification = "await using 释放路径不适用 ConfigureAwait 链式写法。")]
-public sealed class NetDownloader(INetClient netClient, LumaEngineOptions options) : IDownloader
+public sealed class NetDownloader<TState>(INetClient netClient, LumaEngineOptions options) : IDownloader<TState>
 {
     /// <inheritdoc />
-    public async ValueTask<HttpResponseMessage> DownloadAsync(LumaRequest request, LumaNodeContext context, CancellationToken cancellationToken)
+    public async ValueTask<HttpResponseMessage> DownloadAsync(LumaRequest request, LumaContext<TState> context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
 
-        var effectiveRouteKind = request.RouteKind == LumaRouteKind.Auto ? options.DefaultRouteKind : request.RouteKind;
+        var effectiveRouteKind = request.RouteKind != LumaRouteKind.Auto
+            ? request.RouteKind
+            : context.DefaultRouteKind != LumaRouteKind.Auto
+                ? context.DefaultRouteKind
+                : options.DefaultRouteKind;
         var routeKind = effectiveRouteKind == LumaRouteKind.Proxy ? NetRouteKind.Proxy : NetRouteKind.Direct;
         await using var lease = await netClient.RentAsync(routeKind, cancellationToken).ConfigureAwait(false);
         using var timeoutCancellationTokenSource = CreateTimeoutCancellationTokenSource(request, cancellationToken);

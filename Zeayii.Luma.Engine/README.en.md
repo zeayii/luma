@@ -10,7 +10,7 @@ The Engine module drives the Node lifecycle and runtime governance.
 2. Download requests and dispatch responses back to nodes.
 3. Execute node lifecycle (Start / Handle / Persist hooks).
 4. Persist items in batches and callback nodes.
-5. Keep Cookie semantics aligned with HTTP session leases (HttpClient + CookieContainer).
+5. Keep Cookie semantics aligned with HTTP session leases (HttpClient + CookieContainer), with node default route support.
 6. Publish snapshots and run convergence decisions.
 
 ## Runtime Flow
@@ -19,13 +19,14 @@ The Engine module drives the Node lifecycle and runtime governance.
 sequenceDiagram
     participant Host as Private Host
     participant Engine as LumaEngine
-    participant Spider as ISpider
-    participant Node as LumaNode
+    participant Spider as ISpider<TState>
+    participant Node as LumaNode<TState>
     participant D as IDownloader
     participant Sink as IItemSink
 
     Host->>Engine: RunAsync(spider)
-    Engine->>Spider: CreateRootAsync
+    Engine->>Spider: CreateStateAsync
+    Engine->>Spider: CreateRootAsync(state)
     Spider-->>Engine: RootNode
     Engine->>Node: StartAsync
     Node-->>Engine: NodeResult

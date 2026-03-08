@@ -18,13 +18,13 @@ sequenceDiagram
     participant Root as RootCommand
     participant Module as ILumaCommandModule
     participant Executor as LumaCommandExecutor
-    participant Engine as LumaEngine
+    participant Runner as ILumaSiteRunner
 
     Program->>Root: Parse(args)
     Root->>Module: ConfigureServices
     Root->>Executor: ExecuteAsync<TModule>()
-    Executor->>Engine: RunAsync(spider)
-    Engine-->>Executor: Run completed
+    Executor->>Runner: RunAsync(commandName, runName, token)
+    Runner-->>Executor: Run completed
     Executor-->>Root: exit code
 ```
 

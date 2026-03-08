@@ -1,5 +1,6 @@
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
+using Microsoft.Extensions.Logging;
 
 namespace Zeayii.Luma.Engine.Runtime;
 
@@ -9,7 +10,7 @@ namespace Zeayii.Luma.Engine.Runtime;
 /// 持有节点生命周期、取消源、上下文和状态。
 /// </para>
 /// </summary>
-internal sealed class LumaNodeRuntime : IAsyncDisposable
+internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
 {
     /// <summary>
     /// 释放标记。
@@ -30,16 +31,40 @@ internal sealed class LumaNodeRuntime : IAsyncDisposable
     /// <param name="runId">运行标识。</param>
     /// <param name="runName">运行名称。</param>
     /// <param name="commandName">命令名称。</param>
-    /// <param name="resources">节点资源集合。</param>
+    /// <param name="state">运行状态。</param>
+    /// <param name="htmlParser">HTML 解析器。</param>
+    /// <param name="cookieExecutor">Cookie 容器执行委托。</param>
+    /// <param name="loggerFactory">日志工厂。</param>
     /// <param name="parentToken">父级取消令牌。</param>
-    public LumaNodeRuntime(LumaNode node, string path, int depth, Guid runId, string runName, string commandName, LumaNodeResources resources, CancellationToken parentToken)
+    public LumaNodeRuntime(
+        LumaNode<TState> node,
+        string path,
+        int depth,
+        Guid runId,
+        string runName,
+        string commandName,
+        TState state,
+        IHtmlParser htmlParser,
+        CookieContainerExecutor cookieExecutor,
+        ILoggerFactory loggerFactory,
+        CancellationToken parentToken)
     {
         Node = node ?? throw new ArgumentNullException(nameof(node));
         Path = string.IsNullOrWhiteSpace(path) ? throw new ArgumentNullException(nameof(path)) : path;
         Depth = depth;
-        Resources = resources ?? throw new ArgumentNullException(nameof(resources));
         CancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(parentToken);
-        Context = new LumaNodeContext(runId, runName, commandName, Path, Depth, Resources, CancellationTokenSource.Token);
+        Context = new LumaContext<TState>(
+            runId,
+            runName,
+            commandName,
+            Path,
+            Depth,
+            node.ExecutionOptions.DefaultRouteKind,
+            state,
+            htmlParser ?? throw new ArgumentNullException(nameof(htmlParser)),
+            cookieExecutor ?? throw new ArgumentNullException(nameof(cookieExecutor)),
+            (loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory))).CreateLogger(node.GetType()),
+            CancellationTokenSource.Token);
         State = new LumaNodeState();
         _childConcurrencyGate = new SemaphoreSlim(Math.Max(1, Node.ExecutionOptions.ChildMaxConcurrency));
     }
@@ -47,7 +72,7 @@ internal sealed class LumaNodeRuntime : IAsyncDisposable
     /// <summary>
     /// 抽象层节点。
     /// </summary>
-    public LumaNode Node { get; }
+    public LumaNode<TState> Node { get; }
 
     /// <summary>
     /// 节点路径。
@@ -60,11 +85,6 @@ internal sealed class LumaNodeRuntime : IAsyncDisposable
     public int Depth { get; }
 
     /// <summary>
-    /// 节点资源集合。
-    /// </summary>
-    public LumaNodeResources Resources { get; }
-
-    /// <summary>
     /// 节点取消源。
     /// </summary>
     public CancellationTokenSource CancellationTokenSource { get; }
@@ -72,7 +92,7 @@ internal sealed class LumaNodeRuntime : IAsyncDisposable
     /// <summary>
     /// 节点上下文。
     /// </summary>
-    public LumaNodeContext Context { get; }
+    public LumaContext<TState> Context { get; }
 
     /// <summary>
     /// 节点状态。

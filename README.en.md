@@ -7,7 +7,7 @@ Zeayii.Luma is a Node-driven crawling runtime framework for private provider int
 ## 1. Design Principles
 
 1. Users implement Nodes, not schedulers.
-2. `ISpider` only provides the root node.
+2. `ISpider<TState>` creates run state and provides the root node.
 3. The framework owns request execution, concurrency, backpressure, persistence, and observability.
 4. Nodes declare traversal and child-concurrency preferences through options.
 5. Persistence execution is centralized in Engine; nodes only filter and receive callbacks.
@@ -29,8 +29,10 @@ Zeayii.Luma is a Node-driven crawling runtime framework for private provider int
 
 ## 3. Core Contracts
 
-1. `ISpider.CreateRootAsync`: provides the root node.
-2. `LumaNode` lifecycle:
+1. `ISpider<TState>`:
+- `CreateStateAsync`
+- `CreateRootAsync(state, cancellationToken)`
+2. `LumaNode<TState>` lifecycle:
 - `StartAsync`
 - `HandleResponseAsync`
 - `ShouldPersistAsync`
@@ -39,7 +41,8 @@ Zeayii.Luma is a Node-driven crawling runtime framework for private provider int
 4. `NodeExecutionOptions`:
 - `ChildTraversalPolicy`
 - `ChildMaxConcurrency`
-5. `LumaNodeContext`: runtime metadata + resource capability functions (for example HTML parsing and Cookie operations).
+5. `LumaContext<TState>`: runtime metadata + resource capability functions (for example HTML parsing and Cookie operations).
+6. `NodeExecutionOptions` also includes `DefaultRouteKind` for default node route behavior.
 
 ## 4. Runtime Flow
 
@@ -47,14 +50,15 @@ Zeayii.Luma is a Node-driven crawling runtime framework for private provider int
 sequenceDiagram
     participant Host as Private Host
     participant Engine as LumaEngine
-    participant Spider as ISpider
-    participant Node as LumaNode
+    participant Spider as ISpider<TState>
+    participant Node as LumaNode<TState>
     participant Downloader as IDownloader
     participant Sink as IItemSink
     participant UI as IPresentationManager
 
     Host->>Engine: RunAsync(spider)
-    Engine->>Spider: CreateRootAsync
+    Engine->>Spider: CreateStateAsync
+    Engine->>Spider: CreateRootAsync(state)
     Spider-->>Engine: RootNode
     Engine->>Node: StartAsync(context)
     Node-->>Engine: NodeResult(Requests/Children/Items)

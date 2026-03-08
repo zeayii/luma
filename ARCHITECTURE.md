@@ -11,9 +11,9 @@
 
 ## 2. 分层与边界
 
-- `ISpider`
-  - 仅提供根节点。
-- `LumaNode`
+- `ISpider<TState>`
+  - 创建运行状态并提供根节点。
+- `LumaNode<TState>`
   - 业务语义步骤。
   - 负责请求描述、响应解析、子节点创建、持久化策略回调。
 - `LumaEngine`
@@ -49,10 +49,13 @@
 - `ChildTraversalPolicy`：`Breadth` / `Depth`
 - `ChildMaxConcurrency`
 
-3. `LumaNodeContext`
+3. `LumaContext<TState>`
 - 运行元信息（RunId、RunName、Path、Depth）
 - 资源能力函数（例如 HTML 解析、Cookie 读写）
 - `CancellationToken`
+4. `NodeExecutionOptions.DefaultRouteKind`
+- 节点默认路由类型。
+- 请求与 Cookie 操作在未显式覆盖时优先采用节点默认路由。
 
 ## 5. 运行时流程
 
@@ -60,13 +63,14 @@
 sequenceDiagram
     participant Host as Private Host
     participant Engine as LumaEngine
-    participant Spider as ISpider
-    participant Node as LumaNode
+    participant Spider as ISpider<TState>
+    participant Node as LumaNode<TState>
     participant Downloader as IDownloader
     participant Sink as IItemSink
 
     Host->>Engine: RunAsync(spider)
-    Engine->>Spider: CreateRootAsync
+    Engine->>Spider: CreateStateAsync
+    Engine->>Spider: CreateRootAsync(state)
     Spider-->>Engine: RootNode
     Engine->>Node: StartAsync
     Node-->>Engine: NodeResult
@@ -96,7 +100,7 @@ sequenceDiagram
 
 ## 8. 私有扩展流程
 
-1. 实现 `ISpider` 返回根节点。
+1. 实现 `ISpider<TState>`，创建状态并返回根节点。
 2. 实现 Node 树并定义生命周期逻辑。
 3. 实现 `IItemSink` 处理入库与冲突。
 4. 在私有宿主中完成 DI 组装。

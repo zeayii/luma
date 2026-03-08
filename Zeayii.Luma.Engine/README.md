@@ -10,7 +10,7 @@ Engine 模块负责 Node 生命周期驱动与运行时治理。
 2. 下载请求并分发响应到节点。
 3. 执行节点生命周期（Start / Handle / Persist hooks）。
 4. 批量持久化数据项并回调节点。
-5. 基于网络会话租约维护 Cookie 语义（HttpClient + CookieContainer 同会话）。
+5. 基于网络会话租约维护 Cookie 语义（HttpClient + CookieContainer 同会话），并支持节点默认路由。
 6. 发布运行快照与停止收敛。
 
 ## 运行流程
@@ -19,13 +19,14 @@ Engine 模块负责 Node 生命周期驱动与运行时治理。
 sequenceDiagram
     participant Host as Private Host
     participant Engine as LumaEngine
-    participant Spider as ISpider
-    participant Node as LumaNode
+    participant Spider as ISpider<TState>
+    participant Node as LumaNode<TState>
     participant D as IDownloader
     participant Sink as IItemSink
 
     Host->>Engine: RunAsync(spider)
-    Engine->>Spider: CreateRootAsync
+    Engine->>Spider: CreateStateAsync
+    Engine->>Spider: CreateRootAsync(state)
     Spider-->>Engine: RootNode
     Engine->>Node: StartAsync
     Node-->>Engine: NodeResult

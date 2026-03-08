@@ -13,9 +13,15 @@ public sealed class NodeExecutionOptions
     /// </summary>
     public static NodeExecutionOptions Default { get; } = new()
     {
+        DefaultRouteKind = LumaRouteKind.Auto,
         ChildTraversalPolicy = ChildTraversalPolicy.Breadth,
         ChildMaxConcurrency = 1
     };
+
+    /// <summary>
+    /// 节点默认路由类型。
+    /// </summary>
+    public required LumaRouteKind DefaultRouteKind { get; init; }
 
     /// <summary>
     /// 子节点遍历策略。

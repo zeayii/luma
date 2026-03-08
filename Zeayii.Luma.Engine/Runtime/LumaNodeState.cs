@@ -144,6 +144,7 @@ internal sealed class LumaNodeState
                 Interlocked.Exchange(ref _consecutiveExistingCount, 0);
                 break;
             }
+            case PersistDecision.Skipped:
             default:
             {
                 Interlocked.Exchange(ref _consecutiveExistingCount, 0);

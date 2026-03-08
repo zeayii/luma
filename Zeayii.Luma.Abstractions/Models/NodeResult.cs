@@ -8,12 +8,12 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// 统一承载节点在某次生命周期阶段产出的请求、子节点和待持久化数据项。
 /// </para>
 /// </summary>
-public sealed record NodeResult
+public sealed record NodeResult<TState>
 {
     /// <summary>
     /// 空结果实例。
     /// </summary>
-    public static NodeResult Empty { get; } = new();
+    public static NodeResult<TState> Empty { get; } = new();
 
     /// <summary>
     /// 下一批请求。
@@ -23,7 +23,7 @@ public sealed record NodeResult
     /// <summary>
     /// 下一批子节点。
     /// </summary>
-    public IReadOnlyList<LumaNode> Children { get; init; } = [];
+    public IReadOnlyList<LumaNode<TState>> Children { get; init; } = [];
 
     /// <summary>
     /// 当前批次待持久化数据项。

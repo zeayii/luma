@@ -6,4 +6,4 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// 向节点暴露单条数据项持久化前后所需的上下文信息。
 /// </para>
 /// </summary>
-public readonly record struct PersistContext(LumaNodeContext NodeContext, LumaRequest? SourceRequest, int ItemIndexInBatch);
+public readonly record struct PersistContext<TState>(LumaContext<TState> NodeContext, LumaRequest? SourceRequest, int ItemIndexInBatch);

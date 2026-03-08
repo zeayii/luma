@@ -11,13 +11,20 @@ using Zeayii.Luma.Engine.Engine;
 namespace Zeayii.Luma.Engine.Tests;
 
 /// <summary>
-/// <b>LumaEngine 稳定性与边界行为测试</b>
+/// <b>LumaEngine<TestState> 稳定性与边界行为测试</b>
 /// <para>
 /// 覆盖取消、异常隔离、并发限制、背压、持久化边界与 Cookie 隔离语义。
 /// </para>
 /// </summary>
 public sealed class LumaEngineResilienceTests
 {
+    /// <summary>
+    /// 测试状态对象。
+    /// </summary>
+    private sealed class TestState
+    {
+    }
+
     /// <summary>
     /// 验证运行级取消能中断持续请求链路并完成收尾。
     /// </summary>
@@ -71,7 +78,7 @@ public sealed class LumaEngineResilienceTests
     {
         var probe = new ConcurrencyProbe();
         var children = Enumerable.Range(0, 8)
-            .Select(index => (LumaNode)new DelayStartNode($"child-{index}", probe, TimeSpan.FromMilliseconds(60)))
+            .Select(index => (LumaNode<TestState>)new DelayStartNode($"child-{index}", probe, TimeSpan.FromMilliseconds(60)))
             .ToArray();
         var root = new ParentNode("root", ChildTraversalPolicy.Breadth, 2, children);
         var fixture = CreateFixture();
@@ -149,10 +156,8 @@ public sealed class LumaEngineResilienceTests
 
         await fixture.CreateEngine().RunAsync(new StaticSpider(node), "test-command", "run-cookie-isolation", CancellationToken.None).ConfigureAwait(true);
 
-        Assert.True(node.DirectContainsDirectCookie);
-        Assert.True(node.ProxyContainsProxyCookie);
-        Assert.False(node.ProxyContainsDirectCookie);
-        Assert.False(node.DirectContainsProxyCookie);
+        Assert.True(node.ContainsCookie);
+        Assert.Equal("P", node.CookieValue);
     }
 
     /// <summary>
@@ -164,7 +169,7 @@ public sealed class LumaEngineResilienceTests
     /// <returns>测试夹具。</returns>
     private static EngineFixture CreateFixture(
         LumaEngineOptions? options = null,
-        Func<IReadOnlyList<ItemEnvelope>, IReadOnlyList<PersistResult>>? storeBehavior = null,
+        Func<IReadOnlyList<ItemEnvelope<TestState>>, IReadOnlyList<PersistResult>>? storeBehavior = null,
         TimeSpan? downloaderDelay = null)
     {
         var resolvedOptions = options ?? new LumaEngineOptions
@@ -263,16 +268,17 @@ public sealed class LumaEngineResilienceTests
         /// 创建引擎。
         /// </summary>
         /// <returns>引擎实例。</returns>
-        public LumaEngine CreateEngine()
+        public LumaEngine<TestState> CreateEngine()
         {
-            return new LumaEngine(
+            return new LumaEngine<TestState>(
                 Downloader,
                 ItemSink,
                 LogManager,
                 ProgressManager,
                 _htmlParser,
                 NetClient,
-                NullLogger<LumaEngine>.Instance,
+                NullLoggerFactory.Instance,
+                NullLogger<LumaEngine<TestState>>.Instance,
                 _options);
         }
     }
@@ -281,11 +287,19 @@ public sealed class LumaEngineResilienceTests
     /// 静态蜘蛛。
     /// </summary>
     /// <param name="root">根节点。</param>
-    private sealed class StaticSpider(LumaNode root) : ISpider
+    private sealed class StaticSpider(LumaNode<TestState> root) : ISpider<TestState>
     {
         /// <inheritdoc />
-        public ValueTask<LumaNode> CreateRootAsync(CancellationToken cancellationToken)
+        public ValueTask<TestState> CreateStateAsync(CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new TestState());
+        }
+
+        /// <inheritdoc />
+        public ValueTask<LumaNode<TestState>> CreateRootAsync(TestState state, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(state);
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(root);
         }
@@ -300,7 +314,7 @@ public sealed class LumaEngineResilienceTests
     /// <summary>
     /// 父节点。
     /// </summary>
-    private sealed class ParentNode : LumaNode
+    private sealed class ParentNode : LumaNode<TestState>
     {
         /// <summary>
         /// 遍历策略。
@@ -319,7 +333,7 @@ public sealed class LumaEngineResilienceTests
         /// <param name="policy">遍历策略。</param>
         /// <param name="childMaxConcurrency">并发上限。</param>
         /// <param name="children">子节点。</param>
-        public ParentNode(string key, ChildTraversalPolicy policy, int childMaxConcurrency, params LumaNode[] children) : base(key)
+        public ParentNode(string key, ChildTraversalPolicy policy, int childMaxConcurrency, params LumaNode<TestState>[] children) : base(key)
         {
             _policy = policy;
             _childMaxConcurrency = childMaxConcurrency;
@@ -332,22 +346,23 @@ public sealed class LumaEngineResilienceTests
         /// <inheritdoc />
         public override NodeExecutionOptions ExecutionOptions => new()
         {
+            DefaultRouteKind = LumaRouteKind.Auto,
             ChildTraversalPolicy = _policy,
             ChildMaxConcurrency = _childMaxConcurrency
         };
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(NodeResult.Empty);
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(NodeResult<TestState>.Empty);
         }
     }
 
     /// <summary>
     /// 单数据项节点。
     /// </summary>
-    private class SingleItemNode : LumaNode
+    private class SingleItemNode : LumaNode<TestState>
     {
         /// <summary>
         /// 请求地址。
@@ -377,29 +392,29 @@ public sealed class LumaEngineResilienceTests
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> StartAsync(LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult<TestState>> StartAsync(LumaContext<TestState> context)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(new NodeResult
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new NodeResult<TestState>
             {
                 Requests = [new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(_url)), context.NodePath)]
             });
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(new NodeResult
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new NodeResult<TestState>
             {
                 Items = [_item]
             });
         }
 
         /// <inheritdoc />
-        public override ValueTask OnPersistedAsync(IItem item, PersistResult persistResult, PersistContext context, CancellationToken cancellationToken)
+        public override ValueTask OnPersistedAsync(IItem item, PersistResult persistResult, PersistContext<TestState> context)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            context.NodeContext.CancellationToken.ThrowIfCancellationRequested();
             PersistedResults.Add(persistResult);
             return ValueTask.CompletedTask;
         }
@@ -434,7 +449,7 @@ public sealed class LumaEngineResilienceTests
     /// <summary>
     /// 启动延迟节点。
     /// </summary>
-    private sealed class DelayStartNode : LumaNode
+    private sealed class DelayStartNode : LumaNode<TestState>
     {
         /// <summary>
         /// 并发探针。
@@ -459,13 +474,13 @@ public sealed class LumaEngineResilienceTests
         }
 
         /// <inheritdoc />
-        public override async ValueTask<NodeResult> StartAsync(LumaNodeContext context, CancellationToken cancellationToken)
+        public override async ValueTask<NodeResult<TestState>> StartAsync(LumaContext<TestState> context)
         {
             _probe.Enter();
             try
             {
-                await Task.Delay(_delay, cancellationToken).ConfigureAwait(false);
-                return NodeResult.Empty;
+                await Task.Delay(_delay, context.CancellationToken).ConfigureAwait(false);
+                return NodeResult<TestState>.Empty;
             }
             finally
             {
@@ -474,17 +489,17 @@ public sealed class LumaEngineResilienceTests
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(NodeResult.Empty);
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(NodeResult<TestState>.Empty);
         }
     }
 
     /// <summary>
     /// 多请求节点。
     /// </summary>
-    private sealed class MultiRequestNode : LumaNode
+    private sealed class MultiRequestNode : LumaNode<TestState>
     {
         /// <summary>
         /// 地址列表。
@@ -502,28 +517,28 @@ public sealed class LumaEngineResilienceTests
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> StartAsync(LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult<TestState>> StartAsync(LumaContext<TestState> context)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            context.CancellationToken.ThrowIfCancellationRequested();
             var requests = _urls.Select(url => new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(url)), context.NodePath)).ToArray();
-            return ValueTask.FromResult(new NodeResult
+            return ValueTask.FromResult(new NodeResult<TestState>
             {
                 Requests = requests
             });
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(NodeResult.Empty);
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(NodeResult<TestState>.Empty);
         }
     }
 
     /// <summary>
     /// 持续请求节点。
     /// </summary>
-    private sealed class EndlessRequestNode : LumaNode
+    private sealed class EndlessRequestNode : LumaNode<TestState>
     {
         /// <summary>
         /// 地址。
@@ -541,20 +556,20 @@ public sealed class LumaEngineResilienceTests
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> StartAsync(LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult<TestState>> StartAsync(LumaContext<TestState> context)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(new NodeResult
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new NodeResult<TestState>
             {
                 Requests = [new LumaRequest(new HttpRequestMessage(HttpMethod.Get, _url), context.NodePath)]
             });
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(new NodeResult
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new NodeResult<TestState>
             {
                 Requests = [new LumaRequest(new HttpRequestMessage(HttpMethod.Get, _url), context.NodePath)]
             });
@@ -564,48 +579,43 @@ public sealed class LumaEngineResilienceTests
     /// <summary>
     /// Cookie 隔离验证节点。
     /// </summary>
-    private sealed class CookieIsolationNode(string key) : LumaNode(key)
+    private sealed class CookieIsolationNode(string key) : LumaNode<TestState>(key)
     {
         /// <summary>
-        /// 直连是否包含直连 Cookie。
+        /// 默认路由是否包含 Cookie。
         /// </summary>
-        public bool DirectContainsDirectCookie { get; private set; }
+        public bool ContainsCookie { get; private set; }
 
         /// <summary>
-        /// 代理是否包含代理 Cookie。
+        /// Cookie 值。
         /// </summary>
-        public bool ProxyContainsProxyCookie { get; private set; }
-
-        /// <summary>
-        /// 代理是否包含直连 Cookie。
-        /// </summary>
-        public bool ProxyContainsDirectCookie { get; private set; }
-
-        /// <summary>
-        /// 直连是否包含代理 Cookie。
-        /// </summary>
-        public bool DirectContainsProxyCookie { get; private set; }
+        public string CookieValue { get; private set; } = string.Empty;
 
         /// <inheritdoc />
-        public override async ValueTask<NodeResult> StartAsync(LumaNodeContext context, CancellationToken cancellationToken)
+        public override NodeExecutionOptions ExecutionOptions => new()
+        {
+            DefaultRouteKind = LumaRouteKind.Proxy,
+            ChildTraversalPolicy = ChildTraversalPolicy.Breadth,
+            ChildMaxConcurrency = 1
+        };
+
+        /// <inheritdoc />
+        public override async ValueTask<NodeResult<TestState>> StartAsync(LumaContext<TestState> context)
         {
             var uri = new Uri("https://example.com/");
-            await context.SetCookieAsync(uri, new Cookie("direct", "D", "/", "example.com"), LumaRouteKind.Direct, cancellationToken).ConfigureAwait(false);
-            await context.SetCookieAsync(uri, new Cookie("proxy", "P", "/", "example.com"), LumaRouteKind.Proxy, cancellationToken).ConfigureAwait(false);
+            await context.SetCookieAsync(uri, new Cookie("proxy", "P", "/", "example.com")).ConfigureAwait(false);
+            ContainsCookie = await context.ContainsCookieAsync(uri, "proxy").ConfigureAwait(false);
+            var cookie = await context.GetCookieAsync(uri, "proxy").ConfigureAwait(false);
+            CookieValue = cookie?.Value ?? string.Empty;
 
-            DirectContainsDirectCookie = await context.ContainsCookieAsync(uri, "direct", LumaRouteKind.Direct, cancellationToken).ConfigureAwait(false);
-            ProxyContainsProxyCookie = await context.ContainsCookieAsync(uri, "proxy", LumaRouteKind.Proxy, cancellationToken).ConfigureAwait(false);
-            ProxyContainsDirectCookie = await context.ContainsCookieAsync(uri, "direct", LumaRouteKind.Proxy, cancellationToken).ConfigureAwait(false);
-            DirectContainsProxyCookie = await context.ContainsCookieAsync(uri, "proxy", LumaRouteKind.Direct, cancellationToken).ConfigureAwait(false);
-
-            return NodeResult.Empty;
+            return NodeResult<TestState>.Empty;
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult> HandleResponseAsync(HttpResponseMessage response, LumaNodeContext context, CancellationToken cancellationToken)
+        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(NodeResult.Empty);
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(NodeResult<TestState>.Empty);
         }
     }
 
@@ -662,7 +672,7 @@ public sealed class LumaEngineResilienceTests
     /// <summary>
     /// 伪下载器。
     /// </summary>
-    private sealed class FakeDownloader : IDownloader
+    private sealed class FakeDownloader : IDownloader<TestState>
     {
         /// <summary>
         /// 每次下载延迟。
@@ -689,9 +699,9 @@ public sealed class LumaEngineResilienceTests
         public int DownloadCount => Volatile.Read(ref _downloadCount);
 
         /// <inheritdoc />
-        public async ValueTask<HttpResponseMessage> DownloadAsync(LumaRequest request, LumaNodeContext context, CancellationToken cancellationToken)
+        public async ValueTask<HttpResponseMessage> DownloadAsync(LumaRequest request, LumaContext<TestState> context, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            context.CancellationToken.ThrowIfCancellationRequested();
             if (_delay > TimeSpan.Zero)
             {
                 await Task.Delay(_delay, cancellationToken).ConfigureAwait(false);
@@ -705,29 +715,29 @@ public sealed class LumaEngineResilienceTests
     /// <summary>
     /// 伪持久化入口。
     /// </summary>
-    private sealed class FakeItemSink : IItemSink
+    private sealed class FakeItemSink : IItemSink<TestState>
     {
         /// <summary>
         /// 持久化行为。
         /// </summary>
-        private readonly Func<IReadOnlyList<ItemEnvelope>, IReadOnlyList<PersistResult>> _storeBehavior;
+        private readonly Func<IReadOnlyList<ItemEnvelope<TestState>>, IReadOnlyList<PersistResult>> _storeBehavior;
 
         /// <summary>
         /// 已存储批次。
         /// </summary>
-        public List<IReadOnlyList<ItemEnvelope>> StoredBatches { get; } = [];
+        public List<IReadOnlyList<ItemEnvelope<TestState>>> StoredBatches { get; } = [];
 
         /// <summary>
         /// 初始化持久化入口。
         /// </summary>
         /// <param name="storeBehavior">行为函数。</param>
-        public FakeItemSink(Func<IReadOnlyList<ItemEnvelope>, IReadOnlyList<PersistResult>> storeBehavior)
+        public FakeItemSink(Func<IReadOnlyList<ItemEnvelope<TestState>>, IReadOnlyList<PersistResult>> storeBehavior)
         {
             _storeBehavior = storeBehavior;
         }
 
         /// <inheritdoc />
-        public ValueTask<IReadOnlyList<PersistResult>> StoreBatchAsync(IReadOnlyList<ItemEnvelope> items, CancellationToken cancellationToken)
+        public ValueTask<IReadOnlyList<PersistResult>> StoreBatchAsync(IReadOnlyList<ItemEnvelope<TestState>> items, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             StoredBatches.Add(items.ToArray());
@@ -874,4 +884,6 @@ public sealed class LumaEngineResilienceTests
         }
     }
 }
+
+
 

@@ -7,7 +7,7 @@ Zeayii.Luma 是一个面向站点抓取场景的 Node 驱动运行时框架。
 ## 1. 设计原则
 
 1. 用户只实现 Node，不实现请求调度器。
-2. `ISpider` 只负责提供根节点，不承载解析流程。
+2. `ISpider<TState>` 负责创建运行状态并提供根节点，不承载解析流程。
 3. 框架统一负责请求执行、并发控制、背压、持久化与观测。
 4. 节点通过声明式选项控制子节点遍历策略和并发上限。
 5. 持久化由框架统一执行，节点只决定是否持久化与持久化后回调。
@@ -29,8 +29,10 @@ Zeayii.Luma 是一个面向站点抓取场景的 Node 驱动运行时框架。
 
 ## 3. 核心抽象
 
-1. `ISpider.CreateRootAsync`：返回根节点。
-2. `LumaNode` 生命周期：
+1. `ISpider<TState>`：
+- `CreateStateAsync`
+- `CreateRootAsync(state, cancellationToken)`
+2. `LumaNode<TState>` 生命周期：
 - `StartAsync`
 - `HandleResponseAsync`
 - `ShouldPersistAsync`
@@ -39,7 +41,8 @@ Zeayii.Luma 是一个面向站点抓取场景的 Node 驱动运行时框架。
 4. `NodeExecutionOptions`：
 - `ChildTraversalPolicy`
 - `ChildMaxConcurrency`
-5. `LumaNodeContext`：运行元信息 + 资源能力函数（如 HTML 解析、Cookie 读写）。
+5. `LumaContext<TState>`：运行元信息 + 资源能力函数（如 HTML 解析、Cookie 读写）。
+6. `NodeExecutionOptions` 还包含 `DefaultRouteKind`，用于节点默认请求/会话路由。
 
 ## 4. 运行流程
 
@@ -47,14 +50,15 @@ Zeayii.Luma 是一个面向站点抓取场景的 Node 驱动运行时框架。
 sequenceDiagram
     participant Host as Private Host
     participant Engine as LumaEngine
-    participant Spider as ISpider
-    participant Node as LumaNode
+    participant Spider as ISpider<TState>
+    participant Node as LumaNode<TState>
     participant Downloader as IDownloader
     participant Sink as IItemSink
     participant UI as IPresentationManager
 
     Host->>Engine: RunAsync(spider)
-    Engine->>Spider: CreateRootAsync
+    Engine->>Spider: CreateStateAsync
+    Engine->>Spider: CreateRootAsync(state)
     Spider-->>Engine: RootNode
     Engine->>Node: StartAsync(context)
     Node-->>Engine: NodeResult(Requests/Children/Items)

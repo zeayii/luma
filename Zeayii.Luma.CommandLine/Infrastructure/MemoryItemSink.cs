@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
+using Zeayii.Luma.CommandLine.Sample;
 
 namespace Zeayii.Luma.CommandLine.Infrastructure;
 
@@ -12,7 +13,7 @@ namespace Zeayii.Luma.CommandLine.Infrastructure;
 /// </para>
 /// </summary>
 [SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "由 DI 容器在运行时反射创建。")]
-internal sealed class MemoryItemSink : IItemSink
+internal sealed class MemoryItemSink : IItemSink<SampleState>
 {
     /// <summary>
     /// 已持久化键集合。
@@ -20,7 +21,7 @@ internal sealed class MemoryItemSink : IItemSink
     private readonly ConcurrentDictionary<string, byte> _keys = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
-    public ValueTask<IReadOnlyList<PersistResult>> StoreBatchAsync(IReadOnlyList<ItemEnvelope> items, CancellationToken cancellationToken)
+    public ValueTask<IReadOnlyList<PersistResult>> StoreBatchAsync(IReadOnlyList<ItemEnvelope<SampleState>> items, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(items);

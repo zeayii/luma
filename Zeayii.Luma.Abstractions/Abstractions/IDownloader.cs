@@ -5,7 +5,8 @@ namespace Zeayii.Luma.Abstractions.Abstractions;
 /// <summary>
 /// <b>下载器契约</b>
 /// </summary>
-public interface IDownloader
+/// <typeparam name="TState">实现层定义的运行状态类型。</typeparam>
+public interface IDownloader<TState>
 {
     /// <summary>
     /// 执行下载。
@@ -14,6 +15,6 @@ public interface IDownloader
     /// <param name="context">节点上下文。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>原生 HTTP 响应。</returns>
-    ValueTask<HttpResponseMessage> DownloadAsync(LumaRequest request, LumaNodeContext context, CancellationToken cancellationToken);
+    ValueTask<HttpResponseMessage> DownloadAsync(LumaRequest request, LumaContext<TState> context, CancellationToken cancellationToken);
 }
 

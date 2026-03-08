@@ -11,9 +11,9 @@
 
 ## 2. Layered Boundaries
 
-- `ISpider`
-  - Provides only the root node.
-- `LumaNode`
+- `ISpider<TState>`
+  - Creates run state and provides the root node.
+- `LumaNode<TState>`
   - Represents a business semantic step.
   - Describes requests, parses responses, creates child nodes, and handles persistence callbacks.
 - `LumaEngine`
@@ -49,10 +49,13 @@
 - `ChildTraversalPolicy`: `Breadth` / `Depth`
 - `ChildMaxConcurrency`
 
-3. `LumaNodeContext`
+3. `LumaContext<TState>`
 - Runtime metadata (RunId, RunName, Path, Depth)
 - Resource capability functions (for example HTML parsing and Cookie operations)
 - `CancellationToken`
+4. `NodeExecutionOptions.DefaultRouteKind`
+- Node default route kind.
+- Request and Cookie operations use node default route unless explicitly overridden.
 
 ## 5. Runtime Flow
 
@@ -60,13 +63,14 @@
 sequenceDiagram
     participant Host as Private Host
     participant Engine as LumaEngine
-    participant Spider as ISpider
-    participant Node as LumaNode
+    participant Spider as ISpider<TState>
+    participant Node as LumaNode<TState>
     participant Downloader as IDownloader
     participant Sink as IItemSink
 
     Host->>Engine: RunAsync(spider)
-    Engine->>Spider: CreateRootAsync
+    Engine->>Spider: CreateStateAsync
+    Engine->>Spider: CreateRootAsync(state)
     Spider-->>Engine: RootNode
     Engine->>Node: StartAsync
     Node-->>Engine: NodeResult
@@ -96,7 +100,7 @@ sequenceDiagram
 
 ## 8. Private Extension Workflow
 
-1. Implement `ISpider` to return the root node.
+1. Implement `ISpider<TState>` to create state and return the root node.
 2. Implement the node tree and lifecycle logic.
 3. Implement `IItemSink` for persistence and conflict handling.
 4. Wire everything in your private host DI container.

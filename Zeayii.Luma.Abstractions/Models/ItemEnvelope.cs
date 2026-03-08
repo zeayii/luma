@@ -11,7 +11,7 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// <param name="Item">数据项。</param>
 /// <param name="Context">产生该数据项的节点上下文。</param>
 /// <param name="SourceRequest">产生该数据项的源请求。</param>
-public readonly record struct ItemEnvelope(IItem Item, LumaNodeContext Context, LumaRequest? SourceRequest)
+public readonly record struct ItemEnvelope<TState>(IItem Item, LumaContext<TState> Context, LumaRequest? SourceRequest)
 {
     /// <summary>
     /// 节点路径。
