@@ -30,7 +30,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.5" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.5" />
     <PackageReference Include="System.CommandLine" Version="2.0.3" />
-    <PackageReference Include="Zeayii.Infrastructure.Net.Http" Version="0.0.12" Condition="'$(UseLocalSource)' != 'true'" />
+    <PackageReference Include="Zeayii.Infrastructure.Net.Http" Version="0.0.16" Condition="'$(UseLocalSource)' != 'true'" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UseLocalSource)' == 'true'">
@@ -38,3 +38,4 @@
   </ItemGroup>
 
 </Project>
+

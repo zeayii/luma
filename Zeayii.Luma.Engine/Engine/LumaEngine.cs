@@ -8,7 +8,7 @@ using Zeayii.Luma.Abstractions.Models;
 using Zeayii.Luma.Engine.Configuration;
 using Zeayii.Luma.Engine.Runtime;
 using Zeayii.Luma.Engine.Scheduling;
-using Infrastructure.Net.Abstractions.Http;
+using Zeayii.Infrastructure.Net.Abstractions.Http;
 
 namespace Zeayii.Luma.Engine.Engine;
 
@@ -982,3 +982,4 @@ internal static class LumaEngineLogMessages
     internal static readonly Action<ILogger, string, string, string, string, Exception?> RunScopedStopLog =
         LoggerMessage.Define<string, string, string, string>(LogLevel.Error, new EventId(1009, nameof(RunScopedStopLog)), "Run scoped stop triggered. Node={NodePath}, Scope={Scope}, Code={Code}, Reason={Reason}");
 }
+

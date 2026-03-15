@@ -1,6 +1,6 @@
 using System.Net;
-using Infrastructure.Net.Http.Configuration;
-using Infrastructure.Net.Http.Configuration.Policies;
+using Zeayii.Infrastructure.Net.Http.Configuration;
+using Zeayii.Infrastructure.Net.Http.Configuration.Policies;
 using Zeayii.Luma.Abstractions.Models;
 using Zeayii.Luma.Engine.Configuration;
 using Zeayii.Luma.Presentation.Configuration;
@@ -136,3 +136,4 @@ internal static class OptionsBuilder
         return hasProxy ? LumaRouteKind.Proxy : LumaRouteKind.Direct;
     }
 }
+

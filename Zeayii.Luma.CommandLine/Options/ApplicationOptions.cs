@@ -1,5 +1,5 @@
-using Infrastructure.Net.Http.Configuration.Policies;
-using Infrastructure.Net.Http.Logging;
+using Zeayii.Infrastructure.Net.Http.Configuration.Policies;
+using Zeayii.Infrastructure.Net.Http.Logging;
 using Microsoft.Extensions.Logging;
 using Zeayii.Luma.Abstractions.Models;
 
@@ -253,3 +253,4 @@ internal sealed class ApplicationOptions
     /// </summary>
     public required int HealthCheckFailureThreshold { get; init; }
 }
+

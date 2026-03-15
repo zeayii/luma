@@ -4,7 +4,7 @@ using Zeayii.Luma.CommandLine.Logging;
 using Zeayii.Luma.CommandLine.Options;
 using Zeayii.Luma.Engine.Extensions;
 using Zeayii.Luma.Presentation.Extensions;
-using global::Infrastructure.Net.Http.Extensions;
+using global::Zeayii.Infrastructure.Net.Http.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Linq;
@@ -87,3 +87,5 @@ internal static class LumaCommandExecutor
         };
     }
 }
+
+

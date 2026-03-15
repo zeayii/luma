@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
 using Zeayii.Luma.Engine.Configuration;
-using Infrastructure.Net.Abstractions.Http;
+using Zeayii.Infrastructure.Net.Abstractions.Http;
 
 namespace Zeayii.Luma.Engine.Downloading;
 
@@ -72,3 +72,5 @@ public sealed class NetDownloader<TState>(INetClient netClient, LumaEngineOption
     }
 
 }
+
+

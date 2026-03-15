@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Diagnostics.CodeAnalysis;
-using Infrastructure.Net.Abstractions.Http;
+using Zeayii.Infrastructure.Net.Abstractions.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
@@ -962,6 +962,7 @@ public sealed class LumaEngineResilienceTests
         }
     }
 }
+
 
 
 

@@ -17,7 +17,7 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5" />
-        <PackageReference Include="Zeayii.Infrastructure.Net.Http" Version="0.0.12" Condition="'$(UseLocalSource)' != 'true'" />
+        <PackageReference Include="Zeayii.Infrastructure.Net.Http" Version="0.0.16" Condition="'$(UseLocalSource)' != 'true'" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(UseLocalSource)' == 'true'">
@@ -29,3 +29,4 @@
     </ItemGroup>
 
 </Project>
+
