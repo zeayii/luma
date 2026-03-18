@@ -172,6 +172,25 @@ public sealed class LumaContext<TState>
     }
 
     /// <summary>
+    /// 按 Cookie 自带域信息批量导入 Cookie。
+    /// </summary>
+    /// <param name="cookies">Cookie 集合。</param>
+    /// <returns>异步任务。</returns>
+    public ValueTask ImportCookiesAsync(IEnumerable<Cookie> cookies)
+    {
+        ArgumentNullException.ThrowIfNull(cookies);
+        return _cookieExecutor(DefaultRouteKind, (cookieContainer, _) =>
+        {
+            foreach (var cookie in cookies)
+            {
+                cookieContainer.Add(CloneCookie(cookie));
+            }
+
+            return ValueTask.CompletedTask;
+        }, CancellationToken);
+    }
+
+    /// <summary>
     /// 判断 Cookie 是否存在。
     /// </summary>
     /// <param name="uri">目标地址。</param>
@@ -185,9 +204,7 @@ public sealed class LumaContext<TState>
         var exists = false;
         await _cookieExecutor(DefaultRouteKind, (cookieContainer, _) =>
         {
-            exists = cookieContainer
-                .GetCookies(uri)
-                .Any(cookie => string.Equals(cookie.Name, name, StringComparison.Ordinal));
+            exists = cookieContainer.GetCookies(uri).Any(cookie => string.Equals(cookie.Name, name, StringComparison.Ordinal));
             return ValueTask.CompletedTask;
         }, CancellationToken).ConfigureAwait(false);
         return exists;
@@ -207,9 +224,7 @@ public sealed class LumaContext<TState>
         Cookie? result = null;
         await _cookieExecutor(DefaultRouteKind, (cookieContainer, _) =>
         {
-            var cookie = cookieContainer
-                .GetCookies(uri)
-                .FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.Ordinal));
+            var cookie = cookieContainer.GetCookies(uri).FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.Ordinal));
             result = cookie is null ? null : CloneCookie(cookie);
             return ValueTask.CompletedTask;
         }, CancellationToken).ConfigureAwait(false);
@@ -228,10 +243,7 @@ public sealed class LumaContext<TState>
         IReadOnlyList<Cookie> result = Array.Empty<Cookie>();
         await _cookieExecutor(DefaultRouteKind, (cookieContainer, _) =>
         {
-            result = cookieContainer
-                .GetCookies(uri)
-                .Select(CloneCookie)
-                .ToArray();
+            result = cookieContainer.GetCookies(uri).Select(CloneCookie).ToArray();
             return ValueTask.CompletedTask;
         }, CancellationToken).ConfigureAwait(false);
         return result;
