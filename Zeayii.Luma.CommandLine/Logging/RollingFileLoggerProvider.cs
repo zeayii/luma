@@ -3,22 +3,22 @@ using Microsoft.Extensions.Logging;
 namespace Zeayii.Luma.CommandLine.Logging;
 
 /// <summary>
-/// <b>滚动文件日志提供程序</b>
+///     <b>滚动文件日志提供程序</b>
 /// </summary>
 internal sealed class RollingFileLoggerProvider : ILoggerProvider
 {
     /// <summary>
-    /// 最低输出等级。
+    ///     最低输出等级。
     /// </summary>
     private readonly LogLevel _minimumLevel;
 
     /// <summary>
-    /// 文件写入汇聚器。
+    ///     文件写入汇聚器。
     /// </summary>
     private readonly RollingFileLogSink _sink;
 
     /// <summary>
-    /// 初始化文件日志提供程序。
+    ///     初始化文件日志提供程序。
     /// </summary>
     /// <param name="logDirectory">日志目录。</param>
     /// <param name="minimumLevel">最低输出等级。</param>
@@ -44,4 +44,3 @@ internal sealed class RollingFileLoggerProvider : ILoggerProvider
         _sink.Dispose();
     }
 }
-

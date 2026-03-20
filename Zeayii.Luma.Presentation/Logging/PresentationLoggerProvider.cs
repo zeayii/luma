@@ -1,12 +1,12 @@
+using Microsoft.Extensions.Logging;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
 using Zeayii.Luma.Presentation.Configuration;
-using Microsoft.Extensions.Logging;
 
 namespace Zeayii.Luma.Presentation.Logging;
 
 /// <summary>
-/// <b>Presentation 日志提供程序</b>
+///     <b>Presentation 日志提供程序</b>
 /// </summary>
 public sealed class PresentationLoggerProvider(ILogManager logManager, PresentationOptions options) : ILoggerProvider
 {
@@ -22,30 +22,36 @@ public sealed class PresentationLoggerProvider(ILogManager logManager, Presentat
     }
 
     /// <summary>
-    /// <b>Presentation 日志器</b>
+    ///     <b>Presentation 日志器</b>
     /// </summary>
     private sealed class PresentationLogger(string categoryName, ILogManager logManager, PresentationOptions options) : ILogger
     {
         /// <summary>
-        /// 日志分类名。
+        ///     日志分类名。
         /// </summary>
         private readonly string _categoryName = string.IsNullOrWhiteSpace(categoryName) ? "App" : categoryName;
 
         /// <summary>
-        /// 日志管理器。
+        ///     日志管理器。
         /// </summary>
         private readonly ILogManager _logManager = logManager;
 
         /// <summary>
-        /// 呈现配置。
+        ///     呈现配置。
         /// </summary>
         private readonly PresentationOptions _options = options;
 
         /// <inheritdoc />
-        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Shared;
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull
+        {
+            return NullScope.Shared;
+        }
 
         /// <inheritdoc />
-        public bool IsEnabled(LogLevel logLevel) => logLevel >= _options.MinimumLogLevel;
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return logLevel >= _options.MinimumLogLevel;
+        }
 
         /// <inheritdoc />
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
@@ -56,7 +62,7 @@ public sealed class PresentationLoggerProvider(ILogManager logManager, Presentat
         }
 
         /// <summary>
-        /// 映射日志等级。
+        ///     映射日志等级。
         /// </summary>
         private static LogLevelKind Map(LogLevel logLevel)
         {
@@ -73,17 +79,19 @@ public sealed class PresentationLoggerProvider(ILogManager logManager, Presentat
         }
 
         /// <summary>
-        /// <b>空作用域</b>
+        ///     <b>空作用域</b>
         /// </summary>
         private sealed class NullScope : IDisposable
         {
             /// <summary>
-            /// 单例实例。
+            ///     单例实例。
             /// </summary>
             public static readonly NullScope Shared = new();
 
             /// <inheritdoc />
-            public void Dispose() { }
+            public void Dispose()
+            {
+            }
         }
     }
 }

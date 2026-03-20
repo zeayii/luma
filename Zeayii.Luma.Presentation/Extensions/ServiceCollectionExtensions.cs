@@ -1,21 +1,21 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Presentation.Configuration;
 using Zeayii.Luma.Presentation.Core;
 using Zeayii.Luma.Presentation.Logging;
 using Zeayii.Luma.Presentation.Window;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging;
 
 namespace Zeayii.Luma.Presentation.Extensions;
 
 /// <summary>
-/// <b>Presentation 模块 DI 扩展</b>
+///     <b>Presentation 模块 DI 扩展</b>
 /// </summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// 注册 Presentation 模块。
+    ///     注册 Presentation 模块。
     /// </summary>
     /// <param name="services">服务集合。</param>
     /// <param name="options">呈现配置。</param>
@@ -33,4 +33,3 @@ public static class ServiceCollectionExtensions
         return services;
     }
 }
-

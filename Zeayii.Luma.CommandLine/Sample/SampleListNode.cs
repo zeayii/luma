@@ -1,21 +1,20 @@
-using Zeayii.Luma.Abstractions;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
 
 namespace Zeayii.Luma.CommandLine.Sample;
 
 /// <summary>
-/// <b>示例列表节点</b>
+///     <b>示例列表节点</b>
 /// </summary>
 internal sealed class SampleListNode : LumaNode<SampleState>
 {
     /// <summary>
-    /// 入口地址。
+    ///     入口地址。
     /// </summary>
     private readonly Uri _entryUrl;
 
     /// <summary>
-    /// 初始化节点。
+    ///     初始化节点。
     /// </summary>
     /// <param name="key">节点键。</param>
     /// <param name="entryUrl">入口地址。</param>
@@ -46,4 +45,3 @@ internal sealed class SampleListNode : LumaNode<SampleState>
         return ValueTask.CompletedTask;
     }
 }
-

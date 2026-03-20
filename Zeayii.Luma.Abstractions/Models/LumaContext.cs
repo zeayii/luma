@@ -1,31 +1,31 @@
+using System.Net;
 using AngleSharp.Dom;
 using Microsoft.Extensions.Logging;
 using Zeayii.Luma.Abstractions.Abstractions;
-using System.Net;
 
 namespace Zeayii.Luma.Abstractions.Models;
 
 /// <summary>
-/// <b>Luma 运行上下文</b>
-/// <para>
-/// 由框架构造并贯穿节点生命周期，承载运行元信息、共享状态、日志与资源能力。
-/// </para>
+///     <b>Luma 运行上下文</b>
+///     <para>
+///         由框架构造并贯穿节点生命周期，承载运行元信息、共享状态、日志与资源能力。
+///     </para>
 /// </summary>
 /// <typeparam name="TState">实现层定义的运行状态类型。</typeparam>
 public sealed class LumaContext<TState>
 {
     /// <summary>
-    /// HTML 解析器。
-    /// </summary>
-    private readonly IHtmlParser _htmlParser;
-
-    /// <summary>
-    /// Cookie 访问器。
+    ///     Cookie 访问器。
     /// </summary>
     private readonly ICookieAccessor _cookieAccessor;
 
     /// <summary>
-    /// 初始化运行上下文。
+    ///     HTML 解析器。
+    /// </summary>
+    private readonly IHtmlParser _htmlParser;
+
+    /// <summary>
+    ///     初始化运行上下文。
     /// </summary>
     /// <param name="runId">运行标识。</param>
     /// <param name="runName">运行名称。</param>
@@ -65,52 +65,52 @@ public sealed class LumaContext<TState>
     }
 
     /// <summary>
-    /// 运行标识。
+    ///     运行标识。
     /// </summary>
     public Guid RunId { get; }
 
     /// <summary>
-    /// 运行名称。
+    ///     运行名称。
     /// </summary>
     public string RunName { get; }
 
     /// <summary>
-    /// 命令名称。
+    ///     命令名称。
     /// </summary>
     public string CommandName { get; }
 
     /// <summary>
-    /// 节点路径。
+    ///     节点路径。
     /// </summary>
     public string NodePath { get; }
 
     /// <summary>
-    /// 节点深度。
+    ///     节点深度。
     /// </summary>
     public int Depth { get; }
 
     /// <summary>
-    /// 节点默认路由类型。
+    ///     节点默认路由类型。
     /// </summary>
     public LumaRouteKind DefaultRouteKind { get; }
 
     /// <summary>
-    /// 当前节点状态。
+    ///     当前节点状态。
     /// </summary>
     public TState State { get; }
 
     /// <summary>
-    /// 节点日志器。
+    ///     节点日志器。
     /// </summary>
     public ILogger Logger { get; }
 
     /// <summary>
-    /// 取消令牌。
+    ///     取消令牌。
     /// </summary>
     public CancellationToken CancellationToken { get; }
 
     /// <summary>
-    /// 解析 HTML 文本。
+    ///     解析 HTML 文本。
     /// </summary>
     /// <param name="html">HTML 文本。</param>
     /// <returns>文档对象。</returns>
@@ -120,7 +120,7 @@ public sealed class LumaContext<TState>
     }
 
     /// <summary>
-    /// 写入 Cookie。
+    ///     写入 Cookie。
     /// </summary>
     /// <param name="uri">目标地址。</param>
     /// <param name="cookie">Cookie 对象。</param>
@@ -134,7 +134,7 @@ public sealed class LumaContext<TState>
     }
 
     /// <summary>
-    /// 批量写入 Cookie。
+    ///     批量写入 Cookie。
     /// </summary>
     /// <param name="uri">目标地址。</param>
     /// <param name="cookies">Cookie 集合。</param>
@@ -152,7 +152,7 @@ public sealed class LumaContext<TState>
     }
 
     /// <summary>
-    /// 按 Cookie 自带域信息批量导入 Cookie。
+    ///     按 Cookie 自带域信息批量导入 Cookie。
     /// </summary>
     /// <param name="cookies">Cookie 集合。</param>
     /// <returns>异步任务。</returns>
@@ -163,17 +163,14 @@ public sealed class LumaContext<TState>
         foreach (var cookie in cookies)
         {
             var cookieCopy = CloneCookie(cookie);
-            if (string.IsNullOrWhiteSpace(cookieCopy.Domain))
-            {
-                continue;
-            }
+            if (string.IsNullOrWhiteSpace(cookieCopy.Domain)) continue;
 
             await _cookieAccessor.SetCookieAsync(DefaultRouteKind, cookieCopy, CancellationToken).ConfigureAwait(false);
         }
     }
 
     /// <summary>
-    /// 判断 Cookie 是否存在。
+    ///     判断 Cookie 是否存在。
     /// </summary>
     /// <param name="uri">目标地址。</param>
     /// <param name="name">Cookie 名称。</param>
@@ -188,7 +185,7 @@ public sealed class LumaContext<TState>
     }
 
     /// <summary>
-    /// 获取指定名称 Cookie。
+    ///     获取指定名称 Cookie。
     /// </summary>
     /// <param name="uri">目标地址。</param>
     /// <param name="name">Cookie 名称。</param>
@@ -204,7 +201,7 @@ public sealed class LumaContext<TState>
     }
 
     /// <summary>
-    /// 获取地址下可见的 Cookie 快照。
+    ///     获取地址下可见的 Cookie 快照。
     /// </summary>
     /// <param name="uri">目标地址。</param>
     /// <returns>Cookie 快照集合。</returns>
@@ -217,7 +214,7 @@ public sealed class LumaContext<TState>
     }
 
     /// <summary>
-    /// 移除指定 Cookie。
+    ///     移除指定 Cookie。
     /// </summary>
     /// <param name="uri">目标地址。</param>
     /// <param name="name">Cookie 名称。</param>
@@ -230,10 +227,7 @@ public sealed class LumaContext<TState>
         var cookies = await _cookieAccessor.GetCookiesAsync(DefaultRouteKind, uri.Host, uri.AbsolutePath, CancellationToken).ConfigureAwait(false);
         foreach (var cookie in cookies)
         {
-            if (!string.Equals(cookie.Name, name, StringComparison.Ordinal))
-            {
-                continue;
-            }
+            if (!string.Equals(cookie.Name, name, StringComparison.Ordinal)) continue;
 
             var expiredCookie = CloneCookie(cookie);
             expiredCookie.Value = string.Empty;
@@ -243,7 +237,7 @@ public sealed class LumaContext<TState>
     }
 
     /// <summary>
-    /// 清空地址下 Cookie。
+    ///     清空地址下 Cookie。
     /// </summary>
     /// <param name="uri">目标地址。</param>
     /// <returns>异步任务。</returns>
@@ -254,28 +248,22 @@ public sealed class LumaContext<TState>
     }
 
     /// <summary>
-    /// 构造 Cookie 对应地址。
+    ///     构造 Cookie 对应地址。
     /// </summary>
     /// <param name="cookie">Cookie 对象。</param>
     /// <returns>Cookie 地址。</returns>
     private static Cookie NormalizeCookieForUri(Cookie cookie, Uri uri)
     {
         var normalizedCookie = CloneCookie(cookie);
-        if (string.IsNullOrWhiteSpace(normalizedCookie.Domain))
-        {
-            normalizedCookie.Domain = uri.Host;
-        }
+        if (string.IsNullOrWhiteSpace(normalizedCookie.Domain)) normalizedCookie.Domain = uri.Host;
 
-        if (string.IsNullOrWhiteSpace(normalizedCookie.Path))
-        {
-            normalizedCookie.Path = "/";
-        }
+        if (string.IsNullOrWhiteSpace(normalizedCookie.Path)) normalizedCookie.Path = "/";
 
         return normalizedCookie;
     }
 
     /// <summary>
-    /// 克隆 Cookie 对象。
+    ///     克隆 Cookie 对象。
     /// </summary>
     /// <param name="cookie">源 Cookie。</param>
     /// <returns>克隆结果。</returns>

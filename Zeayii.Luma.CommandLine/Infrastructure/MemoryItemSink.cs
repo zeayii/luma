@@ -7,16 +7,16 @@ using Zeayii.Luma.CommandLine.Sample;
 namespace Zeayii.Luma.CommandLine.Infrastructure;
 
 /// <summary>
-/// <b>内存持久化实现</b>
-/// <para>
-/// 作为框架最小可运行示例使用。
-/// </para>
+///     <b>内存持久化实现</b>
+///     <para>
+///         作为框架最小可运行示例使用。
+///     </para>
 /// </summary>
 [SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "由 DI 容器在运行时反射创建。")]
 internal sealed class MemoryItemSink : IItemSink<SampleState>
 {
     /// <summary>
-    /// 已持久化键集合。
+    ///     已持久化键集合。
     /// </summary>
     private readonly ConcurrentDictionary<string, byte> _keys = new(StringComparer.Ordinal);
 

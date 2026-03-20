@@ -1,37 +1,37 @@
+using Microsoft.Extensions.Logging;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
-using Microsoft.Extensions.Logging;
 
 namespace Zeayii.Luma.Engine.Runtime;
 
 /// <summary>
-/// <b>节点运行时宿主</b>
-/// <para>
-/// 持有节点生命周期、取消源、上下文和状态。
-/// </para>
+///     <b>节点运行时宿主</b>
+///     <para>
+///         持有节点生命周期、取消源、上下文和状态。
+///     </para>
 /// </summary>
 internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
 {
     /// <summary>
-    /// 释放标记。
-    /// </summary>
-    private int _disposed;
-
-    /// <summary>
-    /// 子节点并发闸门。
+    ///     子节点并发闸门。
     /// </summary>
     private readonly SemaphoreSlim _childConcurrencyGate;
 
     /// <summary>
-    /// 节点请求执行闸门。
-    /// <para>
-    /// 仅在 Depth 节点启用，用于保证该节点请求/下载处理阶段串行执行。
-    /// </para>
+    ///     节点请求执行闸门。
+    ///     <para>
+    ///         仅在 Depth 节点启用，用于保证该节点请求/下载处理阶段串行执行。
+    ///     </para>
     /// </summary>
     private readonly SemaphoreSlim? _requestExecutionGate;
 
     /// <summary>
-    /// 初始化节点运行时。
+    ///     释放标记。
+    /// </summary>
+    private int _disposed;
+
+    /// <summary>
+    ///     初始化节点运行时。
     /// </summary>
     /// <param name="node">抽象层节点。</param>
     /// <param name="path">节点路径。</param>
@@ -75,44 +75,55 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
             CancellationTokenSource.Token);
         State = new LumaNodeState();
         _childConcurrencyGate = new SemaphoreSlim(Node.ExecutionOptions.ResolveChildMaxConcurrency());
-        if (Node.ExecutionOptions.ChildTraversalPolicy == ChildTraversalPolicy.Depth)
-        {
-            _requestExecutionGate = new SemaphoreSlim(1, 1);
-        }
+        if (Node.ExecutionOptions.ChildTraversalPolicy == ChildTraversalPolicy.Depth) _requestExecutionGate = new SemaphoreSlim(1, 1);
     }
 
     /// <summary>
-    /// 抽象层节点。
+    ///     抽象层节点。
     /// </summary>
     public LumaNode<TState> Node { get; }
 
     /// <summary>
-    /// 节点路径。
+    ///     节点路径。
     /// </summary>
     public string Path { get; }
 
     /// <summary>
-    /// 节点深度。
+    ///     节点深度。
     /// </summary>
     public int Depth { get; }
 
     /// <summary>
-    /// 节点取消源。
+    ///     节点取消源。
     /// </summary>
     public CancellationTokenSource CancellationTokenSource { get; }
 
     /// <summary>
-    /// 节点上下文。
+    ///     节点上下文。
     /// </summary>
     public LumaContext<TState> Context { get; }
 
     /// <summary>
-    /// 节点状态。
+    ///     节点状态。
     /// </summary>
     public LumaNodeState State { get; }
 
     /// <summary>
-    /// 进入子节点扩展并发闸门。
+    ///     释放运行时资源。
+    /// </summary>
+    /// <returns>异步任务。</returns>
+    public ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
+
+        _childConcurrencyGate.Dispose();
+        _requestExecutionGate?.Dispose();
+        CancellationTokenSource.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    ///     进入子节点扩展并发闸门。
     /// </summary>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>异步任务。</returns>
@@ -122,7 +133,7 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     }
 
     /// <summary>
-    /// 释放子节点扩展并发闸门。
+    ///     释放子节点扩展并发闸门。
     /// </summary>
     public void ReleaseChildSlot()
     {
@@ -130,22 +141,19 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     }
 
     /// <summary>
-    /// 进入节点请求执行闸门。
+    ///     进入节点请求执行闸门。
     /// </summary>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>异步任务。</returns>
     public Task WaitRequestExecutionSlotAsync(CancellationToken cancellationToken)
     {
-        if (_requestExecutionGate is null)
-        {
-            return Task.CompletedTask;
-        }
+        if (_requestExecutionGate is null) return Task.CompletedTask;
 
         return _requestExecutionGate.WaitAsync(cancellationToken);
     }
 
     /// <summary>
-    /// 释放节点请求执行闸门。
+    ///     释放节点请求执行闸门。
     /// </summary>
     public void ReleaseRequestExecutionSlot()
     {
@@ -153,32 +161,12 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     }
 
     /// <summary>
-    /// 尝试取消当前节点。
+    ///     尝试取消当前节点。
     /// </summary>
     /// <param name="reason">停止原因。</param>
     public void Cancel(string reason)
     {
         State.SetStatus(NodeExecutionStatus.Stopping, reason);
-        if (!CancellationTokenSource.IsCancellationRequested)
-        {
-            CancellationTokenSource.Cancel();
-        }
-    }
-
-    /// <summary>
-    /// 释放运行时资源。
-    /// </summary>
-    /// <returns>异步任务。</returns>
-    public ValueTask DisposeAsync()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        _childConcurrencyGate.Dispose();
-        _requestExecutionGate?.Dispose();
-        CancellationTokenSource.Dispose();
-        return ValueTask.CompletedTask;
+        if (!CancellationTokenSource.IsCancellationRequested) CancellationTokenSource.Cancel();
     }
 }

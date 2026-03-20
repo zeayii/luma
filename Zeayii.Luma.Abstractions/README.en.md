@@ -9,6 +9,7 @@ This module defines the stable public contracts of Luma.
 1. Defines provider entry contract: `ISpider<TState>`.
 2. Defines node lifecycle base type: `LumaNode<TState>`.
 3. Defines shared models:
+
 - `LumaRequest` (wrapping `HttpRequestMessage`) / `HttpResponseMessage`
 - `NodeResult` / `NodeExecutionOptions`
 - `LumaContext<TState>` (Context exposes parsing and Cookie capability functions)

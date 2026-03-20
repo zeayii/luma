@@ -3,47 +3,47 @@ using Zeayii.Luma.Abstractions.Models;
 namespace Zeayii.Luma.Abstractions.Abstractions;
 
 /// <summary>
-/// <b>抓取节点抽象基类</b>
-/// <para>
-/// 节点负责请求构建、响应处理、下载处理、子节点扩展与数据项输出。
-/// 引擎按节点生命周期调用节点能力，并在每个阶段结束后统一分发节点输出。
-/// </para>
+///     <b>抓取节点抽象基类</b>
+///     <para>
+///         节点负责请求构建、响应处理、下载处理、子节点扩展与数据项输出。
+///         引擎按节点生命周期调用节点能力，并在每个阶段结束后统一分发节点输出。
+///     </para>
 /// </summary>
 /// <typeparam name="TState">节点状态类型。</typeparam>
 public abstract class LumaNode<TState>
 {
     /// <summary>
-    /// 节点输出同步锁。
+    ///     节点输出同步锁。
     /// </summary>
     private readonly Lock _outputSyncRoot = new();
 
     /// <summary>
-    /// 待分发请求缓冲区。
-    /// </summary>
-    private readonly List<LumaRequest> _pendingRequests = [];
-
-    /// <summary>
-    /// 待分发子节点缓冲区。
+    ///     待分发子节点缓冲区。
     /// </summary>
     private readonly List<NodeChildBinding<TState>> _pendingChildren = [];
 
     /// <summary>
-    /// 待持久化数据项缓冲区。
+    ///     待持久化数据项缓冲区。
     /// </summary>
     private readonly List<IItem> _pendingItems = [];
 
     /// <summary>
-    /// 停止标记。
+    ///     待分发请求缓冲区。
     /// </summary>
-    private bool _stopRequested;
+    private readonly List<LumaRequest> _pendingRequests = [];
 
     /// <summary>
-    /// 停止原因。
+    ///     停止原因。
     /// </summary>
     private string _stopReason = string.Empty;
 
     /// <summary>
-    /// 初始化节点。
+    ///     停止标记。
+    /// </summary>
+    private bool _stopRequested;
+
+    /// <summary>
+    ///     初始化节点。
     /// </summary>
     /// <param name="key">节点键。</param>
     protected LumaNode(string key)
@@ -52,22 +52,22 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 节点键。
+    ///     节点键。
     /// </summary>
     public string Key { get; }
 
     /// <summary>
-    /// 节点执行选项。
+    ///     节点执行选项。
     /// </summary>
     public virtual NodeExecutionOptions ExecutionOptions => NodeExecutionOptions.Default;
 
     /// <summary>
-    /// 连续命中已存在结果后建议停止的阈值。
+    ///     连续命中已存在结果后建议停止的阈值。
     /// </summary>
     public virtual int ConsecutiveExistingStopThreshold => 0;
 
     /// <summary>
-    /// 构建初始请求流。
+    ///     构建初始请求流。
     /// </summary>
     /// <param name="context">节点上下文。</param>
     /// <returns>请求异步流。</returns>
@@ -80,7 +80,7 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 处理普通响应。
+    ///     处理普通响应。
     /// </summary>
     /// <param name="response">HTTP 响应。</param>
     /// <param name="context">节点上下文。</param>
@@ -88,7 +88,7 @@ public abstract class LumaNode<TState>
     public abstract ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<TState> context);
 
     /// <summary>
-    /// 判断是否进入下载阶段。
+    ///     判断是否进入下载阶段。
     /// </summary>
     /// <param name="response">普通响应。</param>
     /// <param name="context">节点上下文。</param>
@@ -102,7 +102,7 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 构建下载请求流。
+    ///     构建下载请求流。
     /// </summary>
     /// <param name="response">普通响应。</param>
     /// <param name="context">节点上下文。</param>
@@ -117,7 +117,7 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 处理下载响应。
+    ///     处理下载响应。
     /// </summary>
     /// <param name="response">下载响应。</param>
     /// <param name="request">下载请求。</param>
@@ -133,7 +133,7 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 判断数据项是否应进入持久化管道。
+    ///     判断数据项是否应进入持久化管道。
     /// </summary>
     /// <param name="item">数据项。</param>
     /// <param name="context">持久化上下文。</param>
@@ -146,7 +146,7 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 持久化完成回调。
+    ///     持久化完成回调。
     /// </summary>
     /// <param name="item">数据项。</param>
     /// <param name="persistResult">持久化结果。</param>
@@ -160,7 +160,7 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 节点异常处理钩子。
+    ///     节点异常处理钩子。
     /// </summary>
     /// <param name="exception">异常对象。</param>
     /// <param name="context">异常上下文。</param>
@@ -173,7 +173,7 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 添加子节点（复用父状态）。
+    ///     添加子节点（复用父状态）。
     /// </summary>
     /// <param name="child">子节点实例。</param>
     protected void AddChild(LumaNode<TState> child)
@@ -182,7 +182,7 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 添加子节点（使用状态映射）。
+    ///     添加子节点（使用状态映射）。
     /// </summary>
     /// <param name="child">子节点实例。</param>
     /// <param name="stateMapper">父状态到子状态的映射函数。</param>
@@ -198,7 +198,7 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 添加待调度请求。
+    ///     添加待调度请求。
     /// </summary>
     /// <param name="request">请求对象。</param>
     protected void AddRequest(LumaRequest request)
@@ -211,7 +211,7 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 添加待持久化数据项。
+    ///     添加待持久化数据项。
     /// </summary>
     /// <param name="item">数据项。</param>
     protected void AddItem(IItem item)
@@ -224,7 +224,7 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 请求停止当前节点。
+    ///     请求停止当前节点。
     /// </summary>
     /// <param name="reason">停止原因。</param>
     protected void StopNode(string reason)
@@ -237,7 +237,7 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 提取并清空当前节点输出。
+    ///     提取并清空当前节点输出。
     /// </summary>
     /// <returns>待分发批次。</returns>
     public NodeDispatchBatch<TState> DrainDispatchBatch()
@@ -268,8 +268,11 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
-    /// 返回节点展示文本。
+    ///     返回节点展示文本。
     /// </summary>
     /// <returns>展示文本。</returns>
-    public override string ToString() => Key;
+    public override string ToString()
+    {
+        return Key;
+    }
 }

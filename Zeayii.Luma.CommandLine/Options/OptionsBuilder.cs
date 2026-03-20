@@ -8,12 +8,12 @@ using Zeayii.Luma.Presentation.Configuration;
 namespace Zeayii.Luma.CommandLine.Options;
 
 /// <summary>
-/// <b>运行时配置构建器</b>
+///     <b>运行时配置构建器</b>
 /// </summary>
 internal static class OptionsBuilder
 {
     /// <summary>
-    /// 构建引擎配置。
+    ///     构建引擎配置。
     /// </summary>
     public static LumaEngineOptions BuildEngineOptions(ApplicationOptions applicationOptions)
     {
@@ -35,7 +35,7 @@ internal static class OptionsBuilder
     }
 
     /// <summary>
-    /// 构建呈现配置。
+    ///     构建呈现配置。
     /// </summary>
     public static PresentationOptions BuildPresentationOptions(ApplicationOptions applicationOptions)
     {
@@ -50,7 +50,7 @@ internal static class OptionsBuilder
     }
 
     /// <summary>
-    /// 构建网络配置。
+    ///     构建网络配置。
     /// </summary>
     public static NetOptions BuildNetOptions(ApplicationOptions applicationOptions)
     {
@@ -122,19 +122,15 @@ internal static class OptionsBuilder
     }
 
     /// <summary>
-    /// 解析默认路由类型。
+    ///     解析默认路由类型。
     /// </summary>
     /// <param name="applicationOptions">应用参数。</param>
     /// <returns>最终默认路由类型。</returns>
     private static LumaRouteKind ResolveDefaultRouteKind(ApplicationOptions applicationOptions)
     {
-        if (applicationOptions.DefaultRouteKind != LumaRouteKind.Auto)
-        {
-            return applicationOptions.DefaultRouteKind;
-        }
+        if (applicationOptions.DefaultRouteKind != LumaRouteKind.Auto) return applicationOptions.DefaultRouteKind;
 
         var hasProxy = applicationOptions.Proxies.Count > 0;
         return hasProxy ? LumaRouteKind.Proxy : LumaRouteKind.Direct;
     }
 }
-

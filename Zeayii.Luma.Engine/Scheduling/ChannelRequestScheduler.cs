@@ -3,62 +3,71 @@ using Zeayii.Luma.Abstractions.Models;
 namespace Zeayii.Luma.Engine.Scheduling;
 
 /// <summary>
-/// <b>节点任务调度器</b>
-/// <para>
-/// 提供支持队首/队尾插入的请求调度能力，用于实现节点级广度/深度扩展偏好。
-/// </para>
+///     <b>节点任务调度器</b>
+///     <para>
+///         提供支持队首/队尾插入的请求调度能力，用于实现节点级广度/深度扩展偏好。
+///     </para>
 /// </summary>
 /// <param name="capacity">队列容量上限。</param>
 /// <param name="consumerCount">消费者数量。</param>
 internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisposable
 {
     /// <summary>
-    /// 优先请求队列（Depth 策略，按栈语义消费）。
-    /// </summary>
-    private readonly LinkedList<LumaRequest> _priorityQueue = [];
-
-    /// <summary>
-    /// 普通请求队列（Breadth 策略）。
-    /// </summary>
-    private readonly LinkedList<LumaRequest> _normalQueue = [];
-
-    /// <summary>
-    /// 队列互斥锁。
-    /// </summary>
-    private readonly Lock _syncRoot = new();
-
-    /// <summary>
-    /// 可读信号量。
+    ///     可读信号量。
     /// </summary>
     private readonly SemaphoreSlim _availableItems = new(0);
 
     /// <summary>
-    /// 可写槽位信号量（统一容量背压）。
+    ///     可写槽位信号量（统一容量背压）。
     /// </summary>
     private readonly SemaphoreSlim _availableSlots = new(Math.Max(1, capacity), Math.Max(1, capacity));
 
     /// <summary>
-    /// 当前队列长度。
-    /// </summary>
-    private long _count;
-
-    /// <summary>
-    /// 完成标记。
-    /// </summary>
-    private int _completed;
-
-    /// <summary>
-    /// 消费者数量。
+    ///     消费者数量。
     /// </summary>
     private readonly int _consumerCount = Math.Max(1, consumerCount);
 
     /// <summary>
-    /// 当前排队数量。
+    ///     普通请求队列（Breadth 策略）。
+    /// </summary>
+    private readonly LinkedList<LumaRequest> _normalQueue = [];
+
+    /// <summary>
+    ///     优先请求队列（Depth 策略，按栈语义消费）。
+    /// </summary>
+    private readonly LinkedList<LumaRequest> _priorityQueue = [];
+
+    /// <summary>
+    ///     队列互斥锁。
+    /// </summary>
+    private readonly Lock _syncRoot = new();
+
+    /// <summary>
+    ///     完成标记。
+    /// </summary>
+    private int _completed;
+
+    /// <summary>
+    ///     当前队列长度。
+    /// </summary>
+    private long _count;
+
+    /// <summary>
+    ///     当前排队数量。
     /// </summary>
     public long Count => Interlocked.Read(ref _count);
 
     /// <summary>
-    /// 请求入队。
+    ///     释放调度器资源。
+    /// </summary>
+    public void Dispose()
+    {
+        _availableItems.Dispose();
+        _availableSlots.Dispose();
+    }
+
+    /// <summary>
+    ///     请求入队。
     /// </summary>
     /// <param name="request">请求对象。</param>
     /// <param name="prioritize">是否优先插入队首。</param>
@@ -68,30 +77,20 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (Volatile.Read(ref _completed) != 0)
-        {
-            throw new InvalidOperationException("Scheduler is completed.");
-        }
+        if (Volatile.Read(ref _completed) != 0) throw new InvalidOperationException("Scheduler is completed.");
 
         await _availableSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (Volatile.Read(ref _completed) != 0)
-            {
-                throw new InvalidOperationException("Scheduler is completed.");
-            }
+            if (Volatile.Read(ref _completed) != 0) throw new InvalidOperationException("Scheduler is completed.");
 
             lock (_syncRoot)
             {
                 if (prioritize)
-                {
                     _priorityQueue.AddLast(request);
-                }
                 else
-                {
                     _normalQueue.AddLast(request);
-                }
 
                 Interlocked.Increment(ref _count);
             }
@@ -106,7 +105,7 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
     }
 
     /// <summary>
-    /// 请求出队。
+    ///     请求出队。
     /// </summary>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>请求对象；完成且无数据时返回 null。</returns>
@@ -116,10 +115,7 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0)
-            {
-                return null;
-            }
+            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0) return null;
 
             await _availableItems.WaitAsync(cancellationToken).ConfigureAwait(false);
             lock (_syncRoot)
@@ -144,32 +140,17 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
                 }
             }
 
-            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0)
-            {
-                return null;
-            }
+            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0) return null;
         }
     }
 
     /// <summary>
-    /// 标记调度完成。
+    ///     标记调度完成。
     /// </summary>
     public void Complete()
     {
-        if (Interlocked.Exchange(ref _completed, 1) != 0)
-        {
-            return;
-        }
+        if (Interlocked.Exchange(ref _completed, 1) != 0) return;
 
         _availableItems.Release(_consumerCount);
-    }
-
-    /// <summary>
-    /// 释放调度器资源。
-    /// </summary>
-    public void Dispose()
-    {
-        _availableItems.Dispose();
-        _availableSlots.Dispose();
     }
 }

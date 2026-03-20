@@ -1,78 +1,80 @@
-using System.Threading.Channels;
 using System.Diagnostics.CodeAnalysis;
+using System.Security;
+using System.Text;
+using System.Threading.Channels;
 
 namespace Zeayii.Luma.CommandLine.Logging;
 
 /// <summary>
-/// <b>滚动文件日志写入汇聚器</b>
-/// <para>
-/// 采用多生产者写入通道、单消费者落盘的模型。
-/// </para>
+///     <b>滚动文件日志写入汇聚器</b>
+///     <para>
+///         采用多生产者写入通道、单消费者落盘的模型。
+///     </para>
 /// </summary>
 internal sealed class RollingFileLogSink : IDisposable
 {
     /// <summary>
-    /// 日志目录。
-    /// </summary>
-    private readonly DirectoryInfo _logDirectory;
-
-    /// <summary>
-    /// 日志保留天数。
-    /// </summary>
-    private readonly int _retentionDays;
-
-    /// <summary>
-    /// 日志总大小上限（字节）。
-    /// </summary>
-    private readonly long _maxTotalBytes;
-
-    /// <summary>
-    /// 单日志文件大小上限（字节）。
-    /// </summary>
-    private readonly long _maxFileBytes;
-
-    /// <summary>
-    /// 日志通道。
+    ///     日志通道。
     /// </summary>
     private readonly Channel<string> _channel;
 
     /// <summary>
-    /// 停止取消源。
-    /// </summary>
-    private readonly CancellationTokenSource _stopCancellationTokenSource = new();
-
-    /// <summary>
-    /// 后台消费任务。
+    ///     后台消费任务。
     /// </summary>
     private readonly Task _consumerTask;
 
     /// <summary>
-    /// 当前活跃日期。
+    ///     日志目录。
+    /// </summary>
+    private readonly DirectoryInfo _logDirectory;
+
+    /// <summary>
+    ///     单日志文件大小上限（字节）。
+    /// </summary>
+    private readonly long _maxFileBytes;
+
+    /// <summary>
+    ///     日志总大小上限（字节）。
+    /// </summary>
+    private readonly long _maxTotalBytes;
+
+    /// <summary>
+    ///     日志保留天数。
+    /// </summary>
+    private readonly int _retentionDays;
+
+    /// <summary>
+    ///     停止取消源。
+    /// </summary>
+    private readonly CancellationTokenSource _stopCancellationTokenSource = new();
+
+    /// <summary>
+    ///     当前活跃日期。
     /// </summary>
     private DateOnly _activeDate;
 
     /// <summary>
-    /// 当前文件序号。
-    /// </summary>
-    private int _activeIndex;
-
-    /// <summary>
-    /// 当前写入器。
-    /// </summary>
-    private StreamWriter _writer;
-
-    /// <summary>
-    /// 当前文件全路径。
+    ///     当前文件全路径。
     /// </summary>
     private string _activeFilePath;
 
     /// <summary>
-    /// 已释放标记。
+    ///     当前文件序号。
+    /// </summary>
+    private int _activeIndex;
+
+    /// <summary>
+    ///     已释放标记。
     /// </summary>
     private int _disposed;
 
     /// <summary>
-    /// 初始化滚动文件日志写入器。
+    ///     当前写入器。
+    /// </summary>
+    private StreamWriter _writer;
+
+    /// <summary>
+    ///     初始化滚动文件日志写入器。
     /// </summary>
     /// <param name="logDirectory">日志目录。</param>
     /// <param name="retentionDays">日志保留天数。</param>
@@ -103,29 +105,11 @@ internal sealed class RollingFileLogSink : IDisposable
         _consumerTask = Task.Factory.StartNew(() => ConsumeLoopAsync(_stopCancellationTokenSource.Token).GetAwaiter().GetResult(), _stopCancellationTokenSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
     }
 
-    /// <summary>
-    /// 写入单行日志。
-    /// </summary>
-    /// <param name="line">日志文本。</param>
-    public void WriteLine(string line)
-    {
-        ArgumentNullException.ThrowIfNull(line);
-        if (Volatile.Read(ref _disposed) != 0)
-        {
-            return;
-        }
-
-        _channel.Writer.TryWrite(line);
-    }
-
     /// <inheritdoc />
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "释放阶段需要吞掉后台收尾异常，保证进程退出路径稳定。")]
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
         _channel.Writer.TryComplete();
         _stopCancellationTokenSource.Cancel();
@@ -143,7 +127,19 @@ internal sealed class RollingFileLogSink : IDisposable
     }
 
     /// <summary>
-    /// 后台消费循环。
+    ///     写入单行日志。
+    /// </summary>
+    /// <param name="line">日志文本。</param>
+    public void WriteLine(string line)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        if (Volatile.Read(ref _disposed) != 0) return;
+
+        _channel.Writer.TryWrite(line);
+    }
+
+    /// <summary>
+    ///     后台消费循环。
     /// </summary>
     /// <param name="cancellationToken">取消令牌。</param>
     private async Task ConsumeLoopAsync(CancellationToken cancellationToken)
@@ -177,7 +173,7 @@ internal sealed class RollingFileLogSink : IDisposable
     }
 
     /// <summary>
-    /// 当日期变化或文件大小超过阈值时切换日志文件。
+    ///     当日期变化或文件大小超过阈值时切换日志文件。
     /// </summary>
     /// <param name="nextLine">即将写入的日志行。</param>
     private void RotateIfNeeded(string nextLine)
@@ -190,14 +186,11 @@ internal sealed class RollingFileLogSink : IDisposable
         }
 
         var estimatedBytes = GetEstimatedBytes(nextLine);
-        if (SafeLength(_activeFilePath) + estimatedBytes > _maxFileBytes)
-        {
-            SwitchWriter(_activeDate, _activeIndex + 1);
-        }
+        if (SafeLength(_activeFilePath) + estimatedBytes > _maxFileBytes) SwitchWriter(_activeDate, _activeIndex + 1);
     }
 
     /// <summary>
-    /// 切换当前写入器。
+    ///     切换当前写入器。
     /// </summary>
     /// <param name="date">目标日期。</param>
     /// <param name="index">目标序号。</param>
@@ -212,7 +205,7 @@ internal sealed class RollingFileLogSink : IDisposable
     }
 
     /// <summary>
-    /// 构建日志文件路径。
+    ///     构建日志文件路径。
     /// </summary>
     /// <param name="date">日志日期。</param>
     /// <param name="index">当日文件序号。</param>
@@ -224,7 +217,7 @@ internal sealed class RollingFileLogSink : IDisposable
     }
 
     /// <summary>
-    /// 创建追加写入器。
+    ///     创建追加写入器。
     /// </summary>
     /// <param name="path">日志文件路径。</param>
     /// <returns>写入器实例。</returns>
@@ -234,63 +227,39 @@ internal sealed class RollingFileLogSink : IDisposable
     }
 
     /// <summary>
-    /// 执行日志清理策略。
+    ///     执行日志清理策略。
     /// </summary>
     private void CleanupPolicyFiles()
     {
         var files = _logDirectory.GetFiles("crawler-*.log", SearchOption.TopDirectoryOnly).OrderBy(static file => file.Name, StringComparer.Ordinal).ToList();
-        if (files.Count <= 0)
-        {
-            return;
-        }
+        if (files.Count <= 0) return;
 
         var cutoffDate = DateOnly.FromDateTime(DateTime.Now.AddDays(-_retentionDays));
         foreach (var file in files.ToList())
         {
-            if (!TryParseDateFromFileName(file.Name, out var date))
-            {
-                continue;
-            }
+            if (!TryParseDateFromFileName(file.Name, out var date)) continue;
 
-            if (date >= cutoffDate || PathEquals(file.FullName, _activeFilePath))
-            {
-                continue;
-            }
+            if (date >= cutoffDate || PathEquals(file.FullName, _activeFilePath)) continue;
 
-            if (TryDelete(file))
-            {
-                files.Remove(file);
-            }
+            if (TryDelete(file)) files.Remove(file);
         }
 
         var totalBytes = files.Sum(static file => SafeLength(file.FullName));
-        if (totalBytes <= _maxTotalBytes)
-        {
-            return;
-        }
+        if (totalBytes <= _maxTotalBytes) return;
 
         foreach (var file in files)
         {
-            if (totalBytes <= _maxTotalBytes)
-            {
-                break;
-            }
+            if (totalBytes <= _maxTotalBytes) break;
 
-            if (PathEquals(file.FullName, _activeFilePath))
-            {
-                continue;
-            }
+            if (PathEquals(file.FullName, _activeFilePath)) continue;
 
             var bytes = SafeLength(file.FullName);
-            if (TryDelete(file))
-            {
-                totalBytes -= bytes;
-            }
+            if (TryDelete(file)) totalBytes -= bytes;
         }
     }
 
     /// <summary>
-    /// 解析日志文件名中的日期。
+    ///     解析日志文件名中的日期。
     /// </summary>
     /// <param name="fileName">文件名。</param>
     /// <param name="date">解析出的日期。</param>
@@ -298,10 +267,7 @@ internal sealed class RollingFileLogSink : IDisposable
     private static bool TryParseDateFromFileName(string fileName, out DateOnly date)
     {
         date = DateOnly.MinValue;
-        if (!fileName.StartsWith("crawler-", StringComparison.OrdinalIgnoreCase) || !fileName.EndsWith(".log", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
+        if (!fileName.StartsWith("crawler-", StringComparison.OrdinalIgnoreCase) || !fileName.EndsWith(".log", StringComparison.OrdinalIgnoreCase)) return false;
 
         var raw = fileName["crawler-".Length..^".log".Length];
         var separatorIndex = raw.IndexOf('.');
@@ -310,14 +276,17 @@ internal sealed class RollingFileLogSink : IDisposable
     }
 
     /// <summary>
-    /// 估算单行日志字节数。
+    ///     估算单行日志字节数。
     /// </summary>
     /// <param name="line">日志文本。</param>
     /// <returns>估算字节数。</returns>
-    private static int GetEstimatedBytes(string line) => System.Text.Encoding.UTF8.GetByteCount(line) + Environment.NewLine.Length;
+    private static int GetEstimatedBytes(string line)
+    {
+        return Encoding.UTF8.GetByteCount(line) + Environment.NewLine.Length;
+    }
 
     /// <summary>
-    /// 安全获取文件长度。
+    ///     安全获取文件长度。
     /// </summary>
     /// <param name="path">文件路径。</param>
     /// <returns>文件长度。</returns>
@@ -327,14 +296,14 @@ internal sealed class RollingFileLogSink : IDisposable
         {
             return new FileInfo(path).Length;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or NotSupportedException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException or NotSupportedException)
         {
             return 0;
         }
     }
 
     /// <summary>
-    /// 尝试删除文件。
+    ///     尝试删除文件。
     /// </summary>
     /// <param name="file">目标文件。</param>
     /// <returns>删除成功返回 <c>true</c>。</returns>
@@ -345,14 +314,14 @@ internal sealed class RollingFileLogSink : IDisposable
             file.Delete();
             return true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or NotSupportedException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException or NotSupportedException)
         {
             return false;
         }
     }
 
     /// <summary>
-    /// 路径无大小写比较。
+    ///     路径无大小写比较。
     /// </summary>
     /// <param name="left">路径 A。</param>
     /// <param name="right">路径 B。</param>
@@ -362,4 +331,3 @@ internal sealed class RollingFileLogSink : IDisposable
         return string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
     }
 }
-

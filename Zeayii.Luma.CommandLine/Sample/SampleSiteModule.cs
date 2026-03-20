@@ -1,14 +1,14 @@
+using System.Diagnostics.CodeAnalysis;
+using Microsoft.Extensions.DependencyInjection;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.CommandLine;
 using Zeayii.Luma.CommandLine.Infrastructure;
 using Zeayii.Luma.Engine.Extensions;
-using Microsoft.Extensions.DependencyInjection;
-using System.Diagnostics.CodeAnalysis;
 
 namespace Zeayii.Luma.CommandLine.Sample;
 
 /// <summary>
-/// <b>示例站点模块</b>
+///     <b>示例站点模块</b>
 /// </summary>
 [SuppressMessage("Design", "CA1515:Consider making public types internal", Justification = "命令模块需要保持 public，供源码生成器扫描并挂载命令。")]
 public sealed class SampleSiteModule : ILumaCommandModule

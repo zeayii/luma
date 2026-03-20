@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Zeayii.Luma.Abstractions.Abstractions;
@@ -5,12 +6,11 @@ using Zeayii.Luma.Abstractions.CommandLine;
 using Zeayii.Luma.Engine.Configuration;
 using Zeayii.Luma.Engine.Engine;
 using Zeayii.Luma.Engine.Html;
-using System.Diagnostics.CodeAnalysis;
 
 namespace Zeayii.Luma.Engine.Extensions;
 
 /// <summary>
-/// <b>Core 模块 DI 扩展</b>
+///     <b>Core 模块 DI 扩展</b>
 /// </summary>
 public static class ServiceCollectionExtensions
 {
@@ -18,7 +18,7 @@ public static class ServiceCollectionExtensions
     extension(IServiceCollection services)
     {
         /// <summary>
-        /// 注册爬虫核心模块。
+        ///     注册爬虫核心模块。
         /// </summary>
         /// <param name="options">引擎配置。</param>
         /// <returns>服务集合。</returns>
@@ -34,7 +34,7 @@ public static class ServiceCollectionExtensions
         }
 
         /// <summary>
-        /// 注册站点蜘蛛与强类型运行器。
+        ///     注册站点蜘蛛与强类型运行器。
         /// </summary>
         /// <typeparam name="TState">站点运行状态类型。</typeparam>
         /// <typeparam name="TSpider">站点蜘蛛实现类型。</typeparam>

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Text;
+using AngleSharp.Dom;
 using Microsoft.Extensions.Logging.Abstractions;
 using Zeayii.Infrastructure.Net.Abstractions.Http;
 using Zeayii.Luma.Abstractions.Abstractions;
@@ -12,19 +13,12 @@ using Zeayii.Luma.Engine.Engine;
 namespace Zeayii.Luma.Engine.Tests;
 
 /// <summary>
-/// <b>LumaEngine<TestState> 稳定性与边界行为测试</b>
+///     <b>LumaEngine<TestState> 稳定性与边界行为测试</b>
 /// </summary>
 public sealed class LumaEngineResilienceTests
 {
     /// <summary>
-    /// 测试状态对象。
-    /// </summary>
-    private sealed class TestState
-    {
-    }
-
-    /// <summary>
-    /// 验证运行级取消能中断持续请求链路并完成收尾。
+    ///     验证运行级取消能中断持续请求链路并完成收尾。
     /// </summary>
     [Fact]
     public async Task RunAsyncShouldRespectCancellationAndExit()
@@ -39,7 +33,7 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 验证子节点并发限制会约束 BuildRequests 阶段并发展开上限。
+    ///     验证子节点并发限制会约束 BuildRequests 阶段并发展开上限。
     /// </summary>
     [Fact]
     public async Task RunAsyncShouldApplyChildMaxConcurrencyLimit()
@@ -57,14 +51,14 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 验证请求通道容量较小时不会丢请求（背压生效）。
+    ///     验证请求通道容量较小时不会丢请求（背压生效）。
     /// </summary>
     [Fact]
     public async Task RunAsyncShouldNotLoseRequestsWhenRequestChannelIsFull()
     {
         var node = new MultiRequestNode("root", Enumerable.Range(1, 20).Select(index => $"https://example.com/request/{index}").ToArray());
         var fixture = CreateFixture(
-            options: new LumaEngineOptions
+            new LumaEngineOptions
             {
                 DefaultRouteKind = LumaRouteKind.Direct,
                 RequestWorkerCount = 1,
@@ -85,13 +79,13 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 验证连续已存在阈值命中后节点会进入停止语义。
+    ///     验证连续已存在阈值命中后节点会进入停止语义。
     /// </summary>
     [Fact]
     public async Task RunAsyncShouldStopNodeWhenAlreadyExistsThresholdReached()
     {
         var node = new ThresholdNode("root", "https://example.com/already", new TestItem("Y"), 1);
-        var fixture = CreateFixture(storeBehavior: static _ => [PersistResult.AlreadyExists("exists", suggestStopNode: false)]);
+        var fixture = CreateFixture(storeBehavior: static _ => [PersistResult.AlreadyExists("exists", false)]);
 
         await fixture.CreateEngine().RunAsync(new StaticSpider(node), "test-command", "run-threshold", CancellationToken.None).ConfigureAwait(true);
 
@@ -101,7 +95,7 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 验证持久化返回数量与输入不一致时引擎会快速失败。
+    ///     验证持久化返回数量与输入不一致时引擎会快速失败。
     /// </summary>
     [Fact]
     public async Task RunAsyncShouldThrowWhenPersistResultCountMismatch()
@@ -114,7 +108,7 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 验证节点级停止异常仅停止当前节点，不中断整次运行。
+    ///     验证节点级停止异常仅停止当前节点，不中断整次运行。
     /// </summary>
     [Fact]
     public async Task RunAsyncShouldOnlyStopCurrentNodeWhenNodeScopedStopExceptionThrown()
@@ -130,7 +124,7 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 验证运行级停止异常会触发全局取消并终止运行。
+    ///     验证运行级停止异常会触发全局取消并终止运行。
     /// </summary>
     [Fact]
     public async Task RunAsyncShouldStopRunWhenRunScopedStopExceptionThrown()
@@ -148,7 +142,7 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 验证节点异常处理钩子返回 KeepRunning 时不会中断整次运行。
+    ///     验证节点异常处理钩子返回 KeepRunning 时不会中断整次运行。
     /// </summary>
     [Fact]
     public async Task RunAsyncShouldContinueWhenNodeExceptionActionIsKeepRunning()
@@ -165,7 +159,7 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 创建测试夹具。
+    ///     创建测试夹具。
     /// </summary>
     private static EngineFixture CreateFixture(
         LumaEngineOptions? options = null,
@@ -197,22 +191,29 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 测试夹具。
+    ///     测试状态对象。
+    /// </summary>
+    private sealed class TestState
+    {
+    }
+
+    /// <summary>
+    ///     测试夹具。
     /// </summary>
     private sealed class EngineFixture
     {
         /// <summary>
-        /// HTML 解析器。
+        ///     HTML 解析器。
         /// </summary>
         private readonly FakeHtmlParser _htmlParser;
 
         /// <summary>
-        /// 引擎配置。
+        ///     引擎配置。
         /// </summary>
         private readonly LumaEngineOptions _options;
 
         /// <summary>
-        /// 初始化测试夹具。
+        ///     初始化测试夹具。
         /// </summary>
         public EngineFixture(FakeItemSink itemSink, FakeLogManager logManager, FakeProgressManager progressManager, FakeHtmlParser htmlParser, FakeNetClient netClient, LumaEngineOptions options)
         {
@@ -225,27 +226,27 @@ public sealed class LumaEngineResilienceTests
         }
 
         /// <summary>
-        /// 持久化入口。
+        ///     持久化入口。
         /// </summary>
         public FakeItemSink ItemSink { get; }
 
         /// <summary>
-        /// 日志管理器。
+        ///     日志管理器。
         /// </summary>
         private FakeLogManager LogManager { get; }
 
         /// <summary>
-        /// 进度管理器。
+        ///     进度管理器。
         /// </summary>
         public FakeProgressManager ProgressManager { get; }
 
         /// <summary>
-        /// 网络客户端。
+        ///     网络客户端。
         /// </summary>
         public FakeNetClient NetClient { get; }
 
         /// <summary>
-        /// 创建引擎。
+        ///     创建引擎。
         /// </summary>
         public LumaEngine<TestState> CreateEngine()
         {
@@ -262,7 +263,7 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 静态蜘蛛。
+    ///     静态蜘蛛。
     /// </summary>
     private sealed class StaticSpider(LumaNode<TestState> root) : ISpider<TestState>
     {
@@ -282,30 +283,27 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 测试数据项。
+    ///     测试数据项。
     /// </summary>
     private sealed record TestItem(string Id) : IItem;
 
     /// <summary>
-    /// 父节点。
+    ///     父节点。
     /// </summary>
     private sealed class ParentNode : LumaNode<TestState>
     {
         /// <summary>
-        /// 执行选项。
+        ///     执行选项。
         /// </summary>
         private readonly NodeExecutionOptions _executionOptions;
 
         /// <summary>
-        /// 初始化父节点。
+        ///     初始化父节点。
         /// </summary>
         public ParentNode(string key, NodeExecutionOptions executionOptions, params LumaNode<TestState>[] children) : base(key)
         {
             _executionOptions = executionOptions;
-            foreach (var child in children)
-            {
-                AddChild(child);
-            }
+            foreach (var child in children) AddChild(child);
         }
 
         /// <inheritdoc />
@@ -320,22 +318,22 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 单数据项节点。
+    ///     单数据项节点。
     /// </summary>
     private class SingleItemNode : LumaNode<TestState>
     {
         /// <summary>
-        /// 请求地址。
-        /// </summary>
-        private readonly string _url;
-
-        /// <summary>
-        /// 数据项。
+        ///     数据项。
         /// </summary>
         private readonly IItem _item;
 
         /// <summary>
-        /// 初始化节点。
+        ///     请求地址。
+        /// </summary>
+        private readonly string _url;
+
+        /// <summary>
+        ///     初始化节点。
         /// </summary>
         public SingleItemNode(string key, string url, IItem item) : base(key)
         {
@@ -361,17 +359,17 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 连续已存在阈值节点。
+    ///     连续已存在阈值节点。
     /// </summary>
     private sealed class ThresholdNode : SingleItemNode
     {
         /// <summary>
-        /// 阈值。
+        ///     阈值。
         /// </summary>
         private readonly int _threshold;
 
         /// <summary>
-        /// 初始化阈值节点。
+        ///     初始化阈值节点。
         /// </summary>
         public ThresholdNode(string key, string url, IItem item, int threshold) : base(key, url, item)
         {
@@ -383,22 +381,22 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 启动延迟节点。
+    ///     启动延迟节点。
     /// </summary>
     private sealed class DelayBuildNode : LumaNode<TestState>
     {
         /// <summary>
-        /// 并发探针。
-        /// </summary>
-        private readonly ConcurrencyProbe _probe;
-
-        /// <summary>
-        /// 延迟时长。
+        ///     延迟时长。
         /// </summary>
         private readonly TimeSpan _delay;
 
         /// <summary>
-        /// 初始化节点。
+        ///     并发探针。
+        /// </summary>
+        private readonly ConcurrencyProbe _probe;
+
+        /// <summary>
+        ///     初始化节点。
         /// </summary>
         public DelayBuildNode(string key, ConcurrencyProbe probe, TimeSpan delay) : base(key)
         {
@@ -430,17 +428,17 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 多请求节点。
+    ///     多请求节点。
     /// </summary>
     private sealed class MultiRequestNode : LumaNode<TestState>
     {
         /// <summary>
-        /// 地址列表。
+        ///     地址列表。
         /// </summary>
         private readonly IReadOnlyList<string> _urls;
 
         /// <summary>
-        /// 初始化节点。
+        ///     初始化节点。
         /// </summary>
         public MultiRequestNode(string key, IReadOnlyList<string> urls) : base(key)
         {
@@ -452,10 +450,7 @@ public sealed class LumaEngineResilienceTests
         {
             context.CancellationToken.ThrowIfCancellationRequested();
             await Task.CompletedTask.ConfigureAwait(false);
-            foreach (var requestUrl in _urls)
-            {
-                yield return new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(requestUrl)), context.NodePath);
-            }
+            foreach (var requestUrl in _urls) yield return new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(requestUrl)), context.NodePath);
         }
 
         /// <inheritdoc />
@@ -467,17 +462,17 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 持续请求节点。
+    ///     持续请求节点。
     /// </summary>
     private sealed class EndlessRequestNode : LumaNode<TestState>
     {
         /// <summary>
-        /// 地址。
+        ///     地址。
         /// </summary>
         private readonly Uri _url;
 
         /// <summary>
-        /// 初始化节点。
+        ///     初始化节点。
         /// </summary>
         public EndlessRequestNode(string key, string url) : base(key)
         {
@@ -501,7 +496,7 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 节点级停止测试节点。
+    ///     节点级停止测试节点。
     /// </summary>
     private sealed class NodeScopedStopNode(string key) : LumaNode<TestState>(key)
     {
@@ -524,7 +519,7 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 运行级停止测试节点。
+    ///     运行级停止测试节点。
     /// </summary>
     private sealed class RunScopedStopNode(string key) : LumaNode<TestState>(key)
     {
@@ -547,17 +542,17 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 异常后继续运行节点。
+    ///     异常后继续运行节点。
     /// </summary>
     private sealed class KeepRunningOnExceptionNode : LumaNode<TestState>
     {
         /// <summary>
-        /// 请求地址。
+        ///     请求地址。
         /// </summary>
         private readonly Uri _requestUri;
 
         /// <summary>
-        /// 初始化节点。
+        ///     初始化节点。
         /// </summary>
         /// <param name="key">节点键。</param>
         /// <param name="requestUrl">请求地址。</param>
@@ -567,7 +562,7 @@ public sealed class LumaEngineResilienceTests
         }
 
         /// <summary>
-        /// 异常钩子是否被调用。
+        ///     异常钩子是否被调用。
         /// </summary>
         public bool OnExceptionInvoked { get; private set; }
 
@@ -593,27 +588,27 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 并发探针。
+    ///     并发探针。
     /// </summary>
     private sealed class ConcurrencyProbe
     {
         /// <summary>
-        /// 当前并发数。
+        ///     当前并发数。
         /// </summary>
         private int _current;
 
         /// <summary>
-        /// 最大并发数。
+        ///     最大并发数。
         /// </summary>
         private int _max;
 
         /// <summary>
-        /// 最大并发数。
+        ///     最大并发数。
         /// </summary>
         public int MaxObserved => Volatile.Read(ref _max);
 
         /// <summary>
-        /// 进入并发区。
+        ///     进入并发区。
         /// </summary>
         public void Enter()
         {
@@ -621,20 +616,14 @@ public sealed class LumaEngineResilienceTests
             while (true)
             {
                 var snapshot = Volatile.Read(ref _max);
-                if (current <= snapshot)
-                {
-                    return;
-                }
+                if (current <= snapshot) return;
 
-                if (Interlocked.CompareExchange(ref _max, current, snapshot) == snapshot)
-                {
-                    return;
-                }
+                if (Interlocked.CompareExchange(ref _max, current, snapshot) == snapshot) return;
             }
         }
 
         /// <summary>
-        /// 离开并发区。
+        ///     离开并发区。
         /// </summary>
         public void Exit()
         {
@@ -643,27 +632,27 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 伪持久化入口。
+    ///     伪持久化入口。
     /// </summary>
     private sealed class FakeItemSink : IItemSink<TestState>
     {
         /// <summary>
-        /// 持久化行为。
+        ///     持久化行为。
         /// </summary>
         private readonly Func<IReadOnlyList<ItemEnvelope<TestState>>, IReadOnlyList<PersistResult>> _storeBehavior;
 
         /// <summary>
-        /// 已存储批次。
-        /// </summary>
-        public List<IReadOnlyList<ItemEnvelope<TestState>>> StoredBatches { get; } = [];
-
-        /// <summary>
-        /// 初始化持久化入口。
+        ///     初始化持久化入口。
         /// </summary>
         public FakeItemSink(Func<IReadOnlyList<ItemEnvelope<TestState>>, IReadOnlyList<PersistResult>> storeBehavior)
         {
             _storeBehavior = storeBehavior;
         }
+
+        /// <summary>
+        ///     已存储批次。
+        /// </summary>
+        public List<IReadOnlyList<ItemEnvelope<TestState>>> StoredBatches { get; } = [];
 
         /// <inheritdoc />
         public ValueTask<IReadOnlyList<PersistResult>> StoreBatchAsync(IReadOnlyList<ItemEnvelope<TestState>> items, CancellationToken cancellationToken)
@@ -675,17 +664,17 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 伪日志管理器。
+    ///     伪日志管理器。
     /// </summary>
     private sealed class FakeLogManager : ILogManager
     {
         /// <summary>
-        /// 日志队列。
+        ///     日志队列。
         /// </summary>
         private readonly ConcurrentQueue<LogEntry> _entries = new();
 
         /// <summary>
-        /// 日志序号。
+        ///     日志序号。
         /// </summary>
         private long _sequenceId;
 
@@ -719,12 +708,12 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 伪进度管理器。
+    ///     伪进度管理器。
     /// </summary>
     private sealed class FakeProgressManager : IProgressManager
     {
         /// <summary>
-        /// 最新快照。
+        ///     最新快照。
         /// </summary>
         public ProgressSnapshot? LastSnapshot { get; private set; }
 
@@ -742,12 +731,12 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 伪 HTML 解析器。
+    ///     伪 HTML 解析器。
     /// </summary>
     private sealed class FakeHtmlParser : IHtmlParser
     {
         /// <inheritdoc />
-        public ValueTask<AngleSharp.Dom.IDocument> ParseAsync(string html, CancellationToken cancellationToken)
+        public ValueTask<IDocument> ParseAsync(string html, CancellationToken cancellationToken)
         {
             _ = html;
             cancellationToken.ThrowIfCancellationRequested();
@@ -756,32 +745,17 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 伪网络客户端。
+    ///     伪网络客户端。
     /// </summary>
     private sealed class FakeNetClient : INetClient
     {
         /// <summary>
-        /// 直连 Cookie 容器。
-        /// </summary>
-        private CookieContainer DirectCookies { get; } = new();
-
-        /// <summary>
-        /// 代理 Cookie 容器。
-        /// </summary>
-        private CookieContainer ProxyCookies { get; } = new();
-
-        /// <summary>
-        /// HTTP 客户端。
-        /// </summary>
-        private HttpClient HttpClient { get; }
-
-        /// <summary>
-        /// 请求计数。
+        ///     请求计数。
         /// </summary>
         private int _requestCount;
 
         /// <summary>
-        /// 初始化网络客户端。
+        ///     初始化网络客户端。
         /// </summary>
         public FakeNetClient(TimeSpan delay)
         {
@@ -789,7 +763,22 @@ public sealed class LumaEngineResilienceTests
         }
 
         /// <summary>
-        /// 请求计数。
+        ///     直连 Cookie 容器。
+        /// </summary>
+        private CookieContainer DirectCookies { get; } = new();
+
+        /// <summary>
+        ///     代理 Cookie 容器。
+        /// </summary>
+        private CookieContainer ProxyCookies { get; } = new();
+
+        /// <summary>
+        ///     HTTP 客户端。
+        /// </summary>
+        private HttpClient HttpClient { get; }
+
+        /// <summary>
+        ///     请求计数。
         /// </summary>
         public int RequestCount => Volatile.Read(ref _requestCount);
 
@@ -804,7 +793,7 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 伪租约。
+    ///     伪租约。
     /// </summary>
     private sealed class FakeHttpSessionLease(HttpClient httpClient, CookieContainer cookieContainer) : IHttpSessionLease
     {
@@ -827,7 +816,7 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    /// 伪 HTTP 消息处理器。
+    ///     伪 HTTP 消息处理器。
     /// </summary>
     private sealed class FakeHttpMessageHandler(TimeSpan delay, Action onRequest) : HttpMessageHandler
     {
@@ -835,10 +824,7 @@ public sealed class LumaEngineResilienceTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (delay > TimeSpan.Zero)
-            {
-                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-            }
+            if (delay > TimeSpan.Zero) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
 
             onRequest();
             return new HttpResponseMessage(HttpStatusCode.OK)

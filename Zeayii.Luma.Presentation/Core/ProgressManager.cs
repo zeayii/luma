@@ -4,12 +4,12 @@ using Zeayii.Luma.Abstractions.Models;
 namespace Zeayii.Luma.Presentation.Core;
 
 /// <summary>
-/// <b>进度管理器</b>
+///     <b>进度管理器</b>
 /// </summary>
 public sealed class ProgressManager : IProgressManager
 {
     /// <summary>
-    /// 当前快照引用。
+    ///     当前快照引用。
     /// </summary>
     private ProgressSnapshot _snapshot = new();
 
@@ -21,6 +21,8 @@ public sealed class ProgressManager : IProgressManager
     }
 
     /// <inheritdoc />
-    public ProgressSnapshot CreateSnapshot() => Volatile.Read(ref _snapshot);
+    public ProgressSnapshot CreateSnapshot()
+    {
+        return Volatile.Read(ref _snapshot);
+    }
 }
-

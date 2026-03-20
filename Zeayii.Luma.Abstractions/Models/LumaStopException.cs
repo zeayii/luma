@@ -1,15 +1,15 @@
 namespace Zeayii.Luma.Abstractions.Models;
 
 /// <summary>
-/// <b>Luma 停止异常</b>
-/// <para>
-/// 用于在节点实现中显式触发生命周期停止语义。
-/// </para>
+///     <b>Luma 停止异常</b>
+///     <para>
+///         用于在节点实现中显式触发生命周期停止语义。
+///     </para>
 /// </summary>
 public sealed class LumaStopException : Exception
 {
     /// <summary>
-    /// 初始化停止异常。
+    ///     初始化停止异常。
     /// </summary>
     /// <param name="scope">停止作用域。</param>
     /// <param name="code">停止原因代码。</param>
@@ -21,7 +21,7 @@ public sealed class LumaStopException : Exception
     }
 
     /// <summary>
-    /// 初始化停止异常。
+    ///     初始化停止异常。
     /// </summary>
     /// <param name="scope">停止作用域。</param>
     /// <param name="code">停止原因代码。</param>
@@ -34,12 +34,12 @@ public sealed class LumaStopException : Exception
     }
 
     /// <summary>
-    /// 停止作用域。
+    ///     停止作用域。
     /// </summary>
     public LumaStopScope Scope { get; }
 
     /// <summary>
-    /// 停止原因代码。
+    ///     停止原因代码。
     /// </summary>
     public string Code { get; }
 }

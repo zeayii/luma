@@ -1,21 +1,21 @@
 using System.CommandLine;
+using Microsoft.Extensions.Logging;
 using Zeayii.Infrastructure.Net.Http.Configuration.Policies;
 using Zeayii.Infrastructure.Net.Http.Logging;
-using Microsoft.Extensions.Logging;
 using Zeayii.Luma.Abstractions.Models;
 
 namespace Zeayii.Luma.CommandLine.Options;
 
 /// <summary>
-/// <b>通用命令参数构建器</b>
-/// <para>
-/// 负责向每个站点子命令挂载统一的全局参数，并在解析后构造 <see cref="ApplicationOptions"/>。
-/// </para>
+///     <b>通用命令参数构建器</b>
+///     <para>
+///         负责向每个站点子命令挂载统一的全局参数，并在解析后构造 <see cref="ApplicationOptions" />。
+///     </para>
 /// </summary>
 internal static class CommonCommandOptionsBuilder
 {
     /// <summary>
-    /// 将通用参数添加到命令对象。
+    ///     将通用参数添加到命令对象。
     /// </summary>
     /// <param name="command">命令对象。</param>
     /// <returns>参数句柄集合。</returns>
@@ -123,10 +123,7 @@ internal static class CommonCommandOptionsBuilder
         {
             var retryBaseDelayMilliseconds = result.GetValue(options.RetryBaseDelayMillisecondsOption);
             var retryMaxDelayMilliseconds = result.GetValue(options.RetryMaxDelayMillisecondsOption);
-            if (retryMaxDelayMilliseconds < retryBaseDelayMilliseconds)
-            {
-                result.AddError("--retry-max-delay-ms must be greater than or equal to --retry-base-delay-ms.");
-            }
+            if (retryMaxDelayMilliseconds < retryBaseDelayMilliseconds) result.AddError("--retry-max-delay-ms must be greater than or equal to --retry-base-delay-ms.");
         });
 
         Add(command, options.RunNameOption);
@@ -180,7 +177,7 @@ internal static class CommonCommandOptionsBuilder
     }
 
     /// <summary>
-    /// 基于解析结果构造应用配置。
+    ///     基于解析结果构造应用配置。
     /// </summary>
     /// <param name="parseResult">解析结果。</param>
     /// <param name="options">通用参数句柄集合。</param>
@@ -246,7 +243,7 @@ internal static class CommonCommandOptionsBuilder
     }
 
     /// <summary>
-    /// 创建带默认值的选项对象。
+    ///     创建带默认值的选项对象。
     /// </summary>
     private static Option<TValue> CreateOption<TValue>(string alias, string description, TValue defaultValue)
     {
@@ -258,7 +255,7 @@ internal static class CommonCommandOptionsBuilder
     }
 
     /// <summary>
-    /// 将选项挂载到命令对象。
+    ///     将选项挂载到命令对象。
     /// </summary>
     private static void Add<TValue>(Command command, Option<TValue> option)
     {
@@ -268,7 +265,7 @@ internal static class CommonCommandOptionsBuilder
     }
 
     /// <summary>
-    /// 为整数选项添加最小值校验规则。
+    ///     为整数选项添加最小值校验规则。
     /// </summary>
     /// <param name="option">需要校验的选项。</param>
     /// <param name="minimum">允许的最小值。</param>
@@ -280,11 +277,7 @@ internal static class CommonCommandOptionsBuilder
         option.Validators.Add(result =>
         {
             var value = result.GetValue(option);
-            if (value < minimum)
-            {
-                result.AddError($"{alias} must be greater than or equal to {minimum}.");
-            }
+            if (value < minimum) result.AddError($"{alias} must be greater than or equal to {minimum}.");
         });
     }
 }
-

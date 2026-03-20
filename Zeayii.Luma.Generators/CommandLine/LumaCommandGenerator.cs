@@ -4,10 +4,10 @@ using Microsoft.CodeAnalysis;
 namespace Zeayii.Luma.Generators.CommandLine;
 
 /// <summary>
-/// <b>爬虫命令生成器</b>
-/// <para>
-/// 扫描实现了站点模块接口的类型，并自动生成子命令挂载代码。
-/// </para>
+///     <b>爬虫命令生成器</b>
+///     <para>
+///         扫描实现了站点模块接口的类型，并自动生成子命令挂载代码。
+///     </para>
 /// </summary>
 [Generator]
 public sealed class LumaCommandGenerator : IIncrementalGenerator
@@ -19,23 +19,20 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// 生成命令源码。
+    ///     生成命令源码。
     /// </summary>
     /// <param name="sourceProductionContext">源生成上下文。</param>
     /// <param name="compilation">编译上下文。</param>
     private static void Emit(SourceProductionContext sourceProductionContext, Compilation compilation)
     {
-        if (!IsEnabled(compilation))
-        {
-            return;
-        }
+        if (!IsEnabled(compilation)) return;
 
         var modules = CollectModules(compilation);
         sourceProductionContext.AddSource("Zeayii.Luma.CommandLine.Generated.LumaCommands.g.cs", GenerateSource(modules));
     }
 
     /// <summary>
-    /// 判断生成器是否具备运行条件。
+    ///     判断生成器是否具备运行条件。
     /// </summary>
     /// <param name="compilation">编译上下文。</param>
     /// <returns>满足条件返回 <c>true</c>。</returns>
@@ -45,17 +42,14 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// 收集所有站点模块类型。
+    ///     收集所有站点模块类型。
     /// </summary>
     /// <param name="compilation">编译上下文。</param>
     /// <returns>模块元数据列表。</returns>
     private static List<ModuleMetadata> CollectModules(Compilation compilation)
     {
         var moduleInterfaceSymbol = compilation.GetTypeByMetadataName("Zeayii.Luma.Abstractions.CommandLine.ILumaCommandModule");
-        if (moduleInterfaceSymbol is null)
-        {
-            return [];
-        }
+        if (moduleInterfaceSymbol is null) return [];
 
         var result = new List<ModuleMetadata>();
         var dedupe = new HashSet<string>(StringComparer.Ordinal);
@@ -65,17 +59,14 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
         };
         assemblies.AddRange(compilation.SourceModule.ReferencedAssemblySymbols);
 
-        foreach (var assembly in assemblies)
-        {
-            CollectFromNamespace(assembly.GlobalNamespace, moduleInterfaceSymbol, result, dedupe);
-        }
+        foreach (var assembly in assemblies) CollectFromNamespace(assembly.GlobalNamespace, moduleInterfaceSymbol, result, dedupe);
 
         result.Sort(static (left, right) => string.Compare(left.TypeDisplay, right.TypeDisplay, StringComparison.Ordinal));
         return result;
     }
 
     /// <summary>
-    /// 递归扫描命名空间。
+    ///     递归扫描命名空间。
     /// </summary>
     /// <param name="namespaceSymbol">命名空间符号。</param>
     /// <param name="moduleInterfaceSymbol">站点模块接口符号。</param>
@@ -83,19 +74,13 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
     /// <param name="dedupe">去重集合。</param>
     private static void CollectFromNamespace(INamespaceSymbol namespaceSymbol, INamedTypeSymbol moduleInterfaceSymbol, List<ModuleMetadata> result, HashSet<string> dedupe)
     {
-        foreach (var typeMember in namespaceSymbol.GetTypeMembers())
-        {
-            CollectFromType(typeMember, moduleInterfaceSymbol, result, dedupe);
-        }
+        foreach (var typeMember in namespaceSymbol.GetTypeMembers()) CollectFromType(typeMember, moduleInterfaceSymbol, result, dedupe);
 
-        foreach (var childNamespace in namespaceSymbol.GetNamespaceMembers())
-        {
-            CollectFromNamespace(childNamespace, moduleInterfaceSymbol, result, dedupe);
-        }
+        foreach (var childNamespace in namespaceSymbol.GetNamespaceMembers()) CollectFromNamespace(childNamespace, moduleInterfaceSymbol, result, dedupe);
     }
 
     /// <summary>
-    /// 扫描类型及其嵌套类型。
+    ///     扫描类型及其嵌套类型。
     /// </summary>
     /// <param name="typeSymbol">类型符号。</param>
     /// <param name="moduleInterfaceSymbol">站点模块接口符号。</param>
@@ -110,20 +95,14 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
         if (typeSymbol.TypeKind == TypeKind.Class && typeSymbol.IsAbstract is false && typeSymbol.DeclaredAccessibility == Accessibility.Public && Implements(typeSymbol, moduleInterfaceSymbol))
         {
             var fullyQualifiedTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            if (dedupe.Add(fullyQualifiedTypeName))
-            {
-                result.Add(new ModuleMetadata(fullyQualifiedTypeName, BuildFactoryName(typeSymbol)));
-            }
+            if (dedupe.Add(fullyQualifiedTypeName)) result.Add(new ModuleMetadata(fullyQualifiedTypeName, BuildFactoryName(typeSymbol)));
         }
 
-        foreach (var nestedType in typeSymbol.GetTypeMembers())
-        {
-            CollectFromType(nestedType, moduleInterfaceSymbol, result, dedupe);
-        }
+        foreach (var nestedType in typeSymbol.GetTypeMembers()) CollectFromType(nestedType, moduleInterfaceSymbol, result, dedupe);
     }
 
     /// <summary>
-    /// 判断类型是否实现指定接口。
+    ///     判断类型是否实现指定接口。
     /// </summary>
     /// <param name="typeSymbol">目标类型。</param>
     /// <param name="interfaceSymbol">接口符号。</param>
@@ -134,29 +113,23 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// 构建命令工厂方法名称。
+    ///     构建命令工厂方法名称。
     /// </summary>
     /// <param name="typeSymbol">站点模块类型。</param>
     /// <returns>工厂方法后缀。</returns>
     private static string BuildFactoryName(INamedTypeSymbol typeSymbol)
     {
         var value = typeSymbol.Name;
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "Unknown";
-        }
+        if (string.IsNullOrWhiteSpace(value)) return "Unknown";
 
         var builder = new StringBuilder(value.Length);
-        foreach (var character in value.Where(char.IsLetterOrDigit))
-        {
-            builder.Append(character);
-        }
+        foreach (var character in value.Where(char.IsLetterOrDigit)) builder.Append(character);
 
         return builder.Length == 0 ? "Unknown" : builder.ToString();
     }
 
     /// <summary>
-    /// 生成最终源码。
+    ///     生成最终源码。
     /// </summary>
     /// <param name="modules">站点模块元数据集合。</param>
     /// <returns>源码文本。</returns>
@@ -186,10 +159,7 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
         builder.AppendLine("    {");
         builder.AppendLine("        global::System.ArgumentNullException.ThrowIfNull(rootCommand);");
 
-        foreach (var module in modules)
-        {
-            builder.Append("        rootCommand.Add(Create").Append(module.FactoryName).AppendLine("Command());");
-        }
+        foreach (var module in modules) builder.Append("        rootCommand.Add(Create").Append(module.FactoryName).AppendLine("Command());");
 
         builder.AppendLine("    }");
 
@@ -221,12 +191,12 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// 站点模块元数据。
+    ///     站点模块元数据。
     /// </summary>
     private sealed class ModuleMetadata
     {
         /// <summary>
-        /// 初始化站点模块元数据。
+        ///     初始化站点模块元数据。
         /// </summary>
         /// <param name="typeDisplay">类型全名。</param>
         /// <param name="factoryName">工厂名称。</param>
@@ -237,14 +207,13 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
         }
 
         /// <summary>
-        /// 类型全名。
+        ///     类型全名。
         /// </summary>
         public string TypeDisplay { get; }
 
         /// <summary>
-        /// 工厂名称。
+        ///     工厂名称。
         /// </summary>
         public string FactoryName { get; }
     }
 }
-
