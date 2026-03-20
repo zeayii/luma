@@ -6,17 +6,6 @@ using System.Net;
 namespace Zeayii.Luma.Abstractions.Models;
 
 /// <summary>
-/// <b>Cookie 容器执行委托</b>
-/// <para>
-/// 由引擎实现，负责基于路由类型绑定真实会话 Cookie 容器并执行操作。
-/// </para>
-/// </summary>
-/// <param name="routeKind">路由类型。</param>
-/// <param name="action">Cookie 操作函数。</param>
-/// <param name="cancellationToken">取消令牌。</param>
-public delegate ValueTask CookieContainerExecutor(LumaRouteKind routeKind, Func<CookieContainer, CancellationToken, ValueTask> action, CancellationToken cancellationToken);
-
-/// <summary>
 /// <b>Luma 运行上下文</b>
 /// <para>
 /// 由框架构造并贯穿节点生命周期，承载运行元信息、共享状态、日志与资源能力。
@@ -31,9 +20,9 @@ public sealed class LumaContext<TState>
     private readonly IHtmlParser _htmlParser;
 
     /// <summary>
-    /// Cookie 容器执行委托。
+    /// Cookie 访问器。
     /// </summary>
-    private readonly CookieContainerExecutor _cookieExecutor;
+    private readonly ICookieAccessor _cookieAccessor;
 
     /// <summary>
     /// 初始化运行上下文。
@@ -46,7 +35,7 @@ public sealed class LumaContext<TState>
     /// <param name="defaultRouteKind">节点默认路由类型。</param>
     /// <param name="state">运行状态。</param>
     /// <param name="htmlParser">HTML 解析器。</param>
-    /// <param name="cookieExecutor">Cookie 容器执行委托。</param>
+    /// <param name="cookieAccessor">Cookie 访问器。</param>
     /// <param name="logger">日志器。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     public LumaContext(
@@ -58,7 +47,7 @@ public sealed class LumaContext<TState>
         LumaRouteKind defaultRouteKind,
         TState state,
         IHtmlParser htmlParser,
-        CookieContainerExecutor cookieExecutor,
+        ICookieAccessor cookieAccessor,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -70,7 +59,7 @@ public sealed class LumaContext<TState>
         DefaultRouteKind = defaultRouteKind;
         State = state;
         _htmlParser = htmlParser ?? throw new ArgumentNullException(nameof(htmlParser));
-        _cookieExecutor = cookieExecutor ?? throw new ArgumentNullException(nameof(cookieExecutor));
+        _cookieAccessor = cookieAccessor ?? throw new ArgumentNullException(nameof(cookieAccessor));
         Logger = logger ?? throw new ArgumentNullException(nameof(logger));
         CancellationToken = cancellationToken;
     }
@@ -106,12 +95,12 @@ public sealed class LumaContext<TState>
     public LumaRouteKind DefaultRouteKind { get; }
 
     /// <summary>
-    /// 实现层运行状态。
+    /// 当前节点状态。
     /// </summary>
     public TState State { get; }
 
     /// <summary>
-    /// 日志器。
+    /// 节点日志器。
     /// </summary>
     public ILogger Logger { get; }
 
@@ -140,14 +129,8 @@ public sealed class LumaContext<TState>
     {
         ArgumentNullException.ThrowIfNull(uri);
         ArgumentNullException.ThrowIfNull(cookie);
-        return _cookieExecutor(
-            DefaultRouteKind,
-            (cookieContainer, _) =>
-            {
-                cookieContainer.Add(uri, cookie);
-                return ValueTask.CompletedTask;
-            },
-            CancellationToken);
+        var normalizedCookie = NormalizeCookieForUri(cookie, uri);
+        return _cookieAccessor.SetCookieAsync(DefaultRouteKind, normalizedCookie, CancellationToken);
     }
 
     /// <summary>
@@ -156,19 +139,16 @@ public sealed class LumaContext<TState>
     /// <param name="uri">目标地址。</param>
     /// <param name="cookies">Cookie 集合。</param>
     /// <returns>异步任务。</returns>
-    public ValueTask SetCookiesAsync(Uri uri, IEnumerable<Cookie> cookies)
+    public async ValueTask SetCookiesAsync(Uri uri, IEnumerable<Cookie> cookies)
     {
         ArgumentNullException.ThrowIfNull(uri);
         ArgumentNullException.ThrowIfNull(cookies);
-        return _cookieExecutor(DefaultRouteKind, (cookieContainer, _) =>
-        {
-            foreach (var cookie in cookies)
-            {
-                cookieContainer.Add(uri, cookie);
-            }
 
-            return ValueTask.CompletedTask;
-        }, CancellationToken);
+        foreach (var cookie in cookies)
+        {
+            var normalizedCookie = NormalizeCookieForUri(cookie, uri);
+            await _cookieAccessor.SetCookieAsync(DefaultRouteKind, normalizedCookie, CancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -176,18 +156,20 @@ public sealed class LumaContext<TState>
     /// </summary>
     /// <param name="cookies">Cookie 集合。</param>
     /// <returns>异步任务。</returns>
-    public ValueTask ImportCookiesAsync(IEnumerable<Cookie> cookies)
+    public async ValueTask ImportCookiesAsync(IEnumerable<Cookie> cookies)
     {
         ArgumentNullException.ThrowIfNull(cookies);
-        return _cookieExecutor(DefaultRouteKind, (cookieContainer, _) =>
+
+        foreach (var cookie in cookies)
         {
-            foreach (var cookie in cookies)
+            var cookieCopy = CloneCookie(cookie);
+            if (string.IsNullOrWhiteSpace(cookieCopy.Domain))
             {
-                cookieContainer.Add(CloneCookie(cookie));
+                continue;
             }
 
-            return ValueTask.CompletedTask;
-        }, CancellationToken);
+            await _cookieAccessor.SetCookieAsync(DefaultRouteKind, cookieCopy, CancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -201,13 +183,8 @@ public sealed class LumaContext<TState>
         ArgumentNullException.ThrowIfNull(uri);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        var exists = false;
-        await _cookieExecutor(DefaultRouteKind, (cookieContainer, _) =>
-        {
-            exists = cookieContainer.GetCookies(uri).Any(cookie => string.Equals(cookie.Name, name, StringComparison.Ordinal));
-            return ValueTask.CompletedTask;
-        }, CancellationToken).ConfigureAwait(false);
-        return exists;
+        var cookies = await _cookieAccessor.GetCookiesAsync(DefaultRouteKind, uri.Host, uri.AbsolutePath, CancellationToken).ConfigureAwait(false);
+        return cookies.Any(cookie => string.Equals(cookie.Name, name, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -221,14 +198,9 @@ public sealed class LumaContext<TState>
         ArgumentNullException.ThrowIfNull(uri);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        Cookie? result = null;
-        await _cookieExecutor(DefaultRouteKind, (cookieContainer, _) =>
-        {
-            var cookie = cookieContainer.GetCookies(uri).FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.Ordinal));
-            result = cookie is null ? null : CloneCookie(cookie);
-            return ValueTask.CompletedTask;
-        }, CancellationToken).ConfigureAwait(false);
-        return result;
+        var cookies = await _cookieAccessor.GetCookiesAsync(DefaultRouteKind, uri.Host, uri.AbsolutePath, CancellationToken).ConfigureAwait(false);
+        var cookie = cookies.FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.Ordinal));
+        return cookie is null ? null : CloneCookie(cookie);
     }
 
     /// <summary>
@@ -240,13 +212,8 @@ public sealed class LumaContext<TState>
     {
         ArgumentNullException.ThrowIfNull(uri);
 
-        IReadOnlyList<Cookie> result = Array.Empty<Cookie>();
-        await _cookieExecutor(DefaultRouteKind, (cookieContainer, _) =>
-        {
-            result = cookieContainer.GetCookies(uri).Select(CloneCookie).ToArray();
-            return ValueTask.CompletedTask;
-        }, CancellationToken).ConfigureAwait(false);
-        return result;
+        var cookies = await _cookieAccessor.GetCookiesAsync(DefaultRouteKind, uri.Host, uri.AbsolutePath, CancellationToken).ConfigureAwait(false);
+        return cookies.Select(CloneCookie).ToArray();
     }
 
     /// <summary>
@@ -255,15 +222,24 @@ public sealed class LumaContext<TState>
     /// <param name="uri">目标地址。</param>
     /// <param name="name">Cookie 名称。</param>
     /// <returns>异步任务。</returns>
-    public ValueTask RemoveCookieAsync(Uri uri, string name)
+    public async ValueTask RemoveCookieAsync(Uri uri, string name)
     {
         ArgumentNullException.ThrowIfNull(uri);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        return _cookieExecutor(DefaultRouteKind, (cookieContainer, _) =>
+
+        var cookies = await _cookieAccessor.GetCookiesAsync(DefaultRouteKind, uri.Host, uri.AbsolutePath, CancellationToken).ConfigureAwait(false);
+        foreach (var cookie in cookies)
         {
-            cookieContainer.Add(uri, new Cookie(name, string.Empty) { Expires = DateTime.UtcNow.AddYears(-1) });
-            return ValueTask.CompletedTask;
-        }, CancellationToken);
+            if (!string.Equals(cookie.Name, name, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var expiredCookie = CloneCookie(cookie);
+            expiredCookie.Value = string.Empty;
+            expiredCookie.Expires = DateTime.UtcNow.AddYears(-1);
+            await _cookieAccessor.SetCookieAsync(DefaultRouteKind, expiredCookie, CancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -274,15 +250,28 @@ public sealed class LumaContext<TState>
     public ValueTask ClearCookiesAsync(Uri uri)
     {
         ArgumentNullException.ThrowIfNull(uri);
-        return _cookieExecutor(DefaultRouteKind, (cookieContainer, _) =>
-        {
-            foreach (var cookie in cookieContainer.GetCookies(uri).Cast<Cookie>())
-            {
-                cookieContainer.Add(uri, new Cookie(cookie.Name, string.Empty) { Expires = DateTime.UtcNow.AddYears(-1) });
-            }
+        return _cookieAccessor.ClearCookiesAsync(DefaultRouteKind, uri.Host, uri.AbsolutePath, CancellationToken);
+    }
 
-            return ValueTask.CompletedTask;
-        }, CancellationToken);
+    /// <summary>
+    /// 构造 Cookie 对应地址。
+    /// </summary>
+    /// <param name="cookie">Cookie 对象。</param>
+    /// <returns>Cookie 地址。</returns>
+    private static Cookie NormalizeCookieForUri(Cookie cookie, Uri uri)
+    {
+        var normalizedCookie = CloneCookie(cookie);
+        if (string.IsNullOrWhiteSpace(normalizedCookie.Domain))
+        {
+            normalizedCookie.Domain = uri.Host;
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedCookie.Path))
+        {
+            normalizedCookie.Path = "/";
+        }
+
+        return normalizedCookie;
     }
 
     /// <summary>

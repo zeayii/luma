@@ -13,7 +13,7 @@ namespace Zeayii.Luma.Engine.Scheduling;
 internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisposable
 {
     /// <summary>
-    /// 优先请求队列（Depth 策略）。
+    /// 优先请求队列（Depth 策略，按栈语义消费）。
     /// </summary>
     private readonly LinkedList<LumaRequest> _priorityQueue = [];
 
@@ -125,10 +125,10 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
             lock (_syncRoot)
             {
                 LinkedListNode<LumaRequest>? node = null;
-                if (_priorityQueue.First is not null)
+                if (_priorityQueue.Last is not null)
                 {
-                    node = _priorityQueue.First;
-                    _priorityQueue.RemoveFirst();
+                    node = _priorityQueue.Last;
+                    _priorityQueue.RemoveLast();
                 }
                 else if (_normalQueue.First is not null)
                 {

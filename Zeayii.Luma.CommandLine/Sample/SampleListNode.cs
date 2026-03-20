@@ -25,16 +25,16 @@ internal sealed class SampleListNode : LumaNode<SampleState>
     }
 
     /// <inheritdoc />
-    public override ValueTask<NodeResult<SampleState>> StartAsync(LumaContext<SampleState> context)
+    public override async IAsyncEnumerable<LumaRequest> BuildRequestsAsync(LumaContext<SampleState> context)
     {
         ArgumentNullException.ThrowIfNull(context);
         context.CancellationToken.ThrowIfCancellationRequested();
-
-        return ValueTask.FromResult(new NodeResult<SampleState> { Requests = [new LumaRequest(new HttpRequestMessage(HttpMethod.Get, _entryUrl), context.NodePath)] });
+        await Task.CompletedTask.ConfigureAwait(false);
+        yield return new LumaRequest(new HttpRequestMessage(HttpMethod.Get, _entryUrl), context.NodePath);
     }
 
     /// <inheritdoc />
-    public override ValueTask<NodeResult<SampleState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<SampleState> context)
+    public override ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<SampleState> context)
     {
         ArgumentNullException.ThrowIfNull(response);
         ArgumentNullException.ThrowIfNull(context);
@@ -42,7 +42,8 @@ internal sealed class SampleListNode : LumaNode<SampleState>
 
         var title = response.IsSuccessStatusCode ? "Example Domain" : "Request Failed";
         var url = response.RequestMessage?.RequestUri?.AbsoluteUri ?? _entryUrl.AbsoluteUri;
-        return ValueTask.FromResult(new NodeResult<SampleState> { Items = [new SampleItem(url, title)] });
+        AddItem(new SampleItem(url, title));
+        return ValueTask.CompletedTask;
     }
 }
 

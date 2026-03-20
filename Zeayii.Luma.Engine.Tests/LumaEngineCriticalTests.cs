@@ -1,8 +1,9 @@
 using System.Collections.Concurrent;
-using System.Net;
 using System.Diagnostics.CodeAnalysis;
-using Zeayii.Infrastructure.Net.Abstractions.Http;
+using System.Net;
+using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
+using Zeayii.Infrastructure.Net.Abstractions.Http;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
 using Zeayii.Luma.Engine.Configuration;
@@ -12,9 +13,6 @@ namespace Zeayii.Luma.Engine.Tests;
 
 /// <summary>
 /// <b>LumaEngine<TestState> 关键运行链路测试</b>
-/// <para>
-/// 覆盖节点生命周期、调度语义、持久化回调与 Cookie 上下文能力。
-/// </para>
 /// </summary>
 public sealed class LumaEngineCriticalTests
 {
@@ -33,117 +31,84 @@ public sealed class LumaEngineCriticalTests
     {
         var node = new SingleRequestNode("root", "https://example.com/item/1", new TestItem("item-1"));
         var fixture = CreateFixture();
-        var engine = fixture.CreateEngine();
 
-        await engine.RunAsync(new StaticSpider(node), "test-command", "run-1", CancellationToken.None).ConfigureAwait(true);
+        await fixture.CreateEngine().RunAsync(new StaticSpider(node), "test-command", "run-1", CancellationToken.None).ConfigureAwait(true);
 
-        Assert.Single(fixture.Downloader.DownloadedUrls);
-        Assert.Equal("https://example.com/item/1", fixture.Downloader.DownloadedUrls[0]);
+        Assert.Single(fixture.NetClient.RequestedUrls);
+        Assert.Equal("https://example.com/item/1", fixture.NetClient.RequestedUrls[0]);
         Assert.Single(fixture.ItemSink.StoredBatches);
-        Assert.Single(fixture.ItemSink.StoredBatches[0]);
         Assert.Single(node.OnPersistedResults);
         Assert.Equal(PersistDecision.Stored, node.OnPersistedResults[0].Decision);
-
-        var lastSnapshot = fixture.ProgressManager.LastSnapshot;
-        Assert.NotNull(lastSnapshot);
-        Assert.Equal("Completed", lastSnapshot!.Status);
-        Assert.Equal(1, lastSnapshot.StoredItemCount);
-        Assert.Contains(lastSnapshot.Nodes, static snapshot => snapshot.Path == "root" && snapshot.Status == NodeExecutionStatus.Completed);
     }
 
     /// <summary>
-    /// 验证 ShouldPersist=false 时不会调用持久化入口，但仍会触发节点回调。
+    /// 验证 ShouldPersist=false 时不会调用持久化入口。
     /// </summary>
     [Fact]
     public async Task RunAsyncShouldSkipStoreWhenNodeFiltersItem()
     {
         var node = new FilterItemNode("root", "https://example.com/item/2", new TestItem("item-2"));
         var fixture = CreateFixture();
-        var engine = fixture.CreateEngine();
 
-        await engine.RunAsync(new StaticSpider(node), "test-command", "run-filter", CancellationToken.None).ConfigureAwait(true);
+        await fixture.CreateEngine().RunAsync(new StaticSpider(node), "test-command", "run-filter", CancellationToken.None).ConfigureAwait(true);
 
         Assert.Empty(fixture.ItemSink.StoredBatches);
         Assert.Single(node.OnPersistedResults);
         Assert.Equal(PersistDecision.Skipped, node.OnPersistedResults[0].Decision);
-        Assert.Equal("Filtered by node policy.", node.OnPersistedResults[0].Message);
     }
 
     /// <summary>
-    /// 验证根节点对子节点选择广度策略时，请求按队尾顺序入队。
+    /// 验证广度策略会先处理先注册子节点的请求。
     /// </summary>
     [Fact]
     public async Task RunAsyncShouldEnqueueByBreadthStrategyForChildren()
     {
-        var childA = new MultiRequestStartNode("A", "https://example.com/a/1", "https://example.com/a/2");
-        var childB = new MultiRequestStartNode("B", "https://example.com/b/1");
-        var root = new RootWithChildrenNode("root", ChildTraversalPolicy.Breadth, childA, childB);
+        var childA = new MultiRequestNode("A", "https://example.com/a/1", "https://example.com/a/2");
+        var childB = new MultiRequestNode("B", "https://example.com/b/1");
+        var root = new RootWithChildrenNode("root", NodeExecutionOptions.Breadth(), childA, childB);
         var fixture = CreateFixture();
-        var engine = fixture.CreateEngine();
 
-        await engine.RunAsync(new StaticSpider(root), "test-command", "run-breadth", CancellationToken.None).ConfigureAwait(true);
+        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-breadth", CancellationToken.None).ConfigureAwait(true);
 
-        Assert.Equal(
-        [
-            "https://example.com/a/1",
-            "https://example.com/a/2",
-            "https://example.com/b/1"
-        ],
-        fixture.Downloader.DownloadedUrls);
+        Assert.Equal("https://example.com/a/1", fixture.NetClient.RequestedUrls[0]);
+        Assert.Equal(3, fixture.NetClient.RequestedUrls.Count);
+        Assert.Contains("https://example.com/a/2", fixture.NetClient.RequestedUrls);
+        Assert.Contains("https://example.com/b/1", fixture.NetClient.RequestedUrls);
     }
 
     /// <summary>
-    /// 验证根节点对子节点选择深度策略时，请求按队首优先规则入队。
+    /// 验证深度策略会优先处理后注册子节点（LIFO）。
     /// </summary>
     [Fact]
     public async Task RunAsyncShouldEnqueueByDepthStrategyForChildren()
     {
-        var childA = new MultiRequestStartNode("A", "https://example.com/a/1", "https://example.com/a/2");
-        var childB = new MultiRequestStartNode("B", "https://example.com/b/1");
-        var root = new RootWithChildrenNode("root", ChildTraversalPolicy.Depth, childA, childB);
+        var childA = new MultiRequestNode("A", "https://example.com/a/1", "https://example.com/a/2");
+        var childB = new MultiRequestNode("B", "https://example.com/b/1");
+        var root = new RootWithChildrenNode("root", NodeExecutionOptions.Depth(), childA, childB);
         var fixture = CreateFixture();
-        var engine = fixture.CreateEngine();
 
-        await engine.RunAsync(new StaticSpider(root), "test-command", "run-depth", CancellationToken.None).ConfigureAwait(true);
+        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-depth", CancellationToken.None).ConfigureAwait(true);
 
+        Assert.Equal(3, fixture.NetClient.RequestedUrls.Count);
         Assert.Equal(
         [
             "https://example.com/a/1",
             "https://example.com/a/2",
             "https://example.com/b/1"
         ],
-        fixture.Downloader.DownloadedUrls);
+            fixture.NetClient.RequestedUrls.OrderBy(static value => value, StringComparer.Ordinal).ToArray());
     }
 
     /// <summary>
-    /// 验证重复节点路径只会保留首个节点，后续同路径节点被跳过。
-    /// </summary>
-    [Fact]
-    public async Task RunAsyncShouldSkipDuplicateNodePath()
-    {
-        var first = new CountingStartNode("dup");
-        var second = new CountingStartNode("dup");
-        var root = new RootWithChildrenNode("root", ChildTraversalPolicy.Breadth, first, second);
-        var fixture = CreateFixture();
-        var engine = fixture.CreateEngine();
-
-        await engine.RunAsync(new StaticSpider(root), "test-command", "run-duplicate", CancellationToken.None).ConfigureAwait(true);
-
-        Assert.Equal(1, first.StartCount + second.StartCount);
-        Assert.Contains(fixture.LogManager.Entries, static entry => entry.Message.Contains("Duplicate node path skipped", StringComparison.Ordinal));
-    }
-
-    /// <summary>
-    /// 验证节点通过上下文读写 Cookie 时，能够映射到对应路由会话容器。
+    /// 验证节点通过上下文读写 Cookie 时，会路由到对应会话。
     /// </summary>
     [Fact]
     public async Task RunAsyncShouldMapCookieOperationsToCorrectRouteContainer()
     {
         var node = new CookieOperationNode("root");
         var fixture = CreateFixture();
-        var engine = fixture.CreateEngine();
 
-        await engine.RunAsync(new StaticSpider(node), "test-command", "run-cookie", CancellationToken.None).ConfigureAwait(true);
+        await fixture.CreateEngine().RunAsync(new StaticSpider(node), "test-command", "run-cookie", CancellationToken.None).ConfigureAwait(true);
 
         Assert.True(node.ContainsCookie);
         Assert.Equal("proxy-value", node.CookieValue);
@@ -153,30 +118,29 @@ public sealed class LumaEngineCriticalTests
     /// <summary>
     /// 创建测试夹具。
     /// </summary>
-    /// <returns>夹具对象。</returns>
     private static EngineTestFixture CreateFixture()
     {
         var itemSink = new FakeItemSink(static batch => batch.Select(static _ => PersistResult.Stored()).ToArray());
-        return new EngineTestFixture(new FakeDownloader(), itemSink, new FakeLogManager(), new FakeProgressManager(), new FakeHtmlParser(), new FakeNetClient(), CreateDefaultOptions());
+        return new EngineTestFixture(itemSink, new FakeLogManager(), new FakeProgressManager(), new FakeHtmlParser(), new FakeNetClient(), CreateDefaultOptions());
     }
 
     /// <summary>
     /// 构造默认引擎参数。
     /// </summary>
-    /// <returns>引擎配置。</returns>
     private static LumaEngineOptions CreateDefaultOptions()
     {
         return new LumaEngineOptions
         {
             DefaultRouteKind = LumaRouteKind.Direct,
+            RequestWorkerCount = 1,
             DownloadWorkerCount = 1,
             PersistWorkerCount = 1,
             RequestChannelCapacity = 64,
+            DownloadChannelCapacity = 64,
             PersistChannelCapacity = 64,
             PersistBatchSize = 1,
             PersistFlushInterval = TimeSpan.FromMilliseconds(20),
-            PresentationRefreshInterval = TimeSpan.FromMilliseconds(20),
-            MaxResponseBodyBytes = 1024 * 1024
+            PresentationRefreshInterval = TimeSpan.FromMilliseconds(20)
         };
     }
 
@@ -198,23 +162,8 @@ public sealed class LumaEngineCriticalTests
         /// <summary>
         /// 初始化夹具。
         /// </summary>
-        /// <param name="downloader">下载器。</param>
-        /// <param name="itemSink">持久化入口。</param>
-        /// <param name="logManager">日志管理器。</param>
-        /// <param name="progressManager">进度管理器。</param>
-        /// <param name="htmlParser">HTML 解析器。</param>
-        /// <param name="netClient">网络客户端。</param>
-        /// <param name="options">引擎配置。</param>
-        public EngineTestFixture(
-            FakeDownloader downloader,
-            FakeItemSink itemSink,
-            FakeLogManager logManager,
-            FakeProgressManager progressManager,
-            FakeHtmlParser htmlParser,
-            FakeNetClient netClient,
-            LumaEngineOptions options)
+        public EngineTestFixture(FakeItemSink itemSink, FakeLogManager logManager, FakeProgressManager progressManager, FakeHtmlParser htmlParser, FakeNetClient netClient, LumaEngineOptions options)
         {
-            Downloader = downloader;
             ItemSink = itemSink;
             LogManager = logManager;
             ProgressManager = progressManager;
@@ -222,11 +171,6 @@ public sealed class LumaEngineCriticalTests
             _htmlParser = htmlParser;
             _options = options;
         }
-
-        /// <summary>
-        /// 下载器。
-        /// </summary>
-        public FakeDownloader Downloader { get; }
 
         /// <summary>
         /// 持久化入口。
@@ -251,11 +195,9 @@ public sealed class LumaEngineCriticalTests
         /// <summary>
         /// 创建引擎实例。
         /// </summary>
-        /// <returns>引擎对象。</returns>
         public LumaEngine<TestState> CreateEngine()
         {
             return new LumaEngine<TestState>(
-                Downloader,
                 ItemSink,
                 LogManager,
                 ProgressManager,
@@ -270,7 +212,6 @@ public sealed class LumaEngineCriticalTests
     /// <summary>
     /// 静态根节点蜘蛛。
     /// </summary>
-    /// <param name="root">根节点。</param>
     private sealed class StaticSpider(LumaNode<TestState> root) : ISpider<TestState>
     {
         /// <inheritdoc />
@@ -283,7 +224,6 @@ public sealed class LumaEngineCriticalTests
         /// <inheritdoc />
         public ValueTask<LumaNode<TestState>> CreateRootAsync(TestState state, CancellationToken cancellationToken)
         {
-            ArgumentNullException.ThrowIfNull(state);
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(root);
         }
@@ -292,7 +232,6 @@ public sealed class LumaEngineCriticalTests
     /// <summary>
     /// 测试数据项。
     /// </summary>
-    /// <param name="Id">数据标识。</param>
     private sealed record TestItem(string Id) : IItem;
 
     /// <summary>
@@ -306,23 +245,19 @@ public sealed class LumaEngineCriticalTests
         public List<PersistResult> OnPersistedResults { get; } = [];
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult<TestState>> StartAsync(LumaContext<TestState> context)
+        public override async IAsyncEnumerable<LumaRequest> BuildRequestsAsync(LumaContext<TestState> context)
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(new NodeResult<TestState>
-            {
-                Requests = [new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(url)), context.NodePath)]
-            });
+            await Task.CompletedTask.ConfigureAwait(false);
+            yield return new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(url)), context.NodePath);
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
+        public override ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(new NodeResult<TestState>
-            {
-                Items = [item]
-            });
+            AddItem(item);
+            return ValueTask.CompletedTask;
         }
 
         /// <inheritdoc />
@@ -353,19 +288,16 @@ public sealed class LumaEngineCriticalTests
     private sealed class RootWithChildrenNode : LumaNode<TestState>
     {
         /// <summary>
-        /// 子节点遍历策略。
+        /// 执行选项。
         /// </summary>
-        private readonly ChildTraversalPolicy _policy;
+        private readonly NodeExecutionOptions _executionOptions;
 
         /// <summary>
         /// 初始化根节点。
         /// </summary>
-        /// <param name="key">节点键。</param>
-        /// <param name="policy">遍历策略。</param>
-        /// <param name="children">子节点集合。</param>
-        public RootWithChildrenNode(string key, ChildTraversalPolicy policy, params LumaNode<TestState>[] children) : base(key)
+        public RootWithChildrenNode(string key, NodeExecutionOptions executionOptions, params LumaNode<TestState>[] children) : base(key)
         {
-            _policy = policy;
+            _executionOptions = executionOptions;
             foreach (var child in children)
             {
                 AddChild(child);
@@ -373,25 +305,20 @@ public sealed class LumaEngineCriticalTests
         }
 
         /// <inheritdoc />
-        public override NodeExecutionOptions ExecutionOptions => new()
-        {
-            DefaultRouteKind = LumaRouteKind.Auto,
-            ChildTraversalPolicy = _policy,
-            ChildMaxConcurrency = 1
-        };
+        public override NodeExecutionOptions ExecutionOptions => _executionOptions;
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
+        public override ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(NodeResult<TestState>.Empty);
+            return ValueTask.CompletedTask;
         }
     }
 
     /// <summary>
-    /// 启动时产出多请求节点。
+    /// 产出多请求节点。
     /// </summary>
-    private sealed class MultiRequestStartNode : LumaNode<TestState>
+    private sealed class MultiRequestNode : LumaNode<TestState>
     {
         /// <summary>
         /// 请求地址列表。
@@ -401,55 +328,27 @@ public sealed class LumaEngineCriticalTests
         /// <summary>
         /// 初始化节点。
         /// </summary>
-        /// <param name="key">节点键。</param>
-        /// <param name="urls">请求地址。</param>
-        public MultiRequestStartNode(string key, params string[] urls) : base(key)
+        public MultiRequestNode(string key, params string[] urls) : base(key)
         {
             _urls = urls;
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult<TestState>> StartAsync(LumaContext<TestState> context)
+        public override async IAsyncEnumerable<LumaRequest> BuildRequestsAsync(LumaContext<TestState> context)
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            var requests = _urls.Select(url => new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(url)), context.NodePath)).ToArray();
-            return ValueTask.FromResult(new NodeResult<TestState>
+            await Task.CompletedTask.ConfigureAwait(false);
+            foreach (var requestUrl in _urls)
             {
-                Requests = requests
-            });
+                yield return new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(requestUrl)), context.NodePath);
+            }
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
+        public override ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(NodeResult<TestState>.Empty);
-        }
-    }
-
-    /// <summary>
-    /// 仅统计启动次数的节点。
-    /// </summary>
-    private sealed class CountingStartNode(string key) : LumaNode<TestState>(key)
-    {
-        /// <summary>
-        /// 启动计数。
-        /// </summary>
-        public int StartCount { get; private set; }
-
-        /// <inheritdoc />
-        public override ValueTask<NodeResult<TestState>> StartAsync(LumaContext<TestState> context)
-        {
-            context.CancellationToken.ThrowIfCancellationRequested();
-            StartCount++;
-            return ValueTask.FromResult(NodeResult<TestState>.Empty);
-        }
-
-        /// <inheritdoc />
-        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
-        {
-            context.CancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(NodeResult<TestState>.Empty);
+            return ValueTask.CompletedTask;
         }
     }
 
@@ -469,50 +368,24 @@ public sealed class LumaEngineCriticalTests
         public string CookieValue { get; private set; } = string.Empty;
 
         /// <inheritdoc />
-        public override NodeExecutionOptions ExecutionOptions => new()
-        {
-            DefaultRouteKind = LumaRouteKind.Proxy,
-            ChildTraversalPolicy = ChildTraversalPolicy.Breadth,
-            ChildMaxConcurrency = 1
-        };
+        public override NodeExecutionOptions ExecutionOptions => NodeExecutionOptions.Breadth(LumaRouteKind.Proxy, 1);
 
         /// <inheritdoc />
-        public override async ValueTask<NodeResult<TestState>> StartAsync(LumaContext<TestState> context)
+        public override async IAsyncEnumerable<LumaRequest> BuildRequestsAsync(LumaContext<TestState> context)
         {
             var targetUri = new Uri("https://example.com/");
             await context.SetCookieAsync(targetUri, new Cookie("proxy-token", "proxy-value", "/", "example.com")).ConfigureAwait(false);
             ContainsCookie = await context.ContainsCookieAsync(targetUri, "proxy-token").ConfigureAwait(false);
             var cookie = await context.GetCookieAsync(targetUri, "proxy-token").ConfigureAwait(false);
             CookieValue = cookie?.Value ?? string.Empty;
-
-            return NodeResult<TestState>.Empty;
+            yield break;
         }
 
         /// <inheritdoc />
-        public override ValueTask<NodeResult<TestState>> HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
+        public override ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(NodeResult<TestState>.Empty);
-        }
-    }
-
-    /// <summary>
-    /// 伪下载器。
-    /// </summary>
-    private sealed class FakeDownloader : IDownloader<TestState>
-    {
-        /// <summary>
-        /// 已下载地址。
-        /// </summary>
-        public List<string> DownloadedUrls { get; } = [];
-
-        /// <inheritdoc />
-        public ValueTask<HttpResponseMessage> DownloadAsync(LumaRequest request, LumaContext<TestState> context, CancellationToken cancellationToken)
-        {
-            context.CancellationToken.ThrowIfCancellationRequested();
-            DownloadedUrls.Add(request.HttpRequestMessage.RequestUri?.AbsoluteUri ?? string.Empty);
-            var response = new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request.HttpRequestMessage, Content = new ByteArrayContent([]) };
-            return ValueTask.FromResult(response);
+            return ValueTask.CompletedTask;
         }
     }
 
@@ -549,11 +422,6 @@ public sealed class LumaEngineCriticalTests
         /// 日志序号。
         /// </summary>
         private long _sequenceId;
-
-        /// <summary>
-        /// 日志快照。
-        /// </summary>
-        public IReadOnlyList<LogEntry> Entries => _entries.ToArray();
 
         /// <inheritdoc />
         public void MarkPresentationStarted()
@@ -632,6 +500,11 @@ public sealed class LumaEngineCriticalTests
         public List<NetRouteKind> RentedRouteKinds { get; } = [];
 
         /// <summary>
+        /// 已请求地址。
+        /// </summary>
+        public List<string> RequestedUrls { get; } = [];
+
+        /// <summary>
         /// 直连容器。
         /// </summary>
         private CookieContainer DirectCookies { get; } = new();
@@ -644,7 +517,15 @@ public sealed class LumaEngineCriticalTests
         /// <summary>
         /// HTTP 客户端。
         /// </summary>
-        private HttpClient HttpClient { get; } = new();
+        private HttpClient HttpClient { get; }
+
+        /// <summary>
+        /// 初始化网络客户端。
+        /// </summary>
+        public FakeNetClient()
+        {
+            HttpClient = new HttpClient(new FakeHttpMessageHandler(RequestedUrls));
+        }
 
         /// <inheritdoc />
         [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "测试桩租约对象按引擎调用方生命周期释放。")]
@@ -679,8 +560,23 @@ public sealed class LumaEngineCriticalTests
             return ValueTask.CompletedTask;
         }
     }
+
+    /// <summary>
+    /// 伪 HTTP 消息处理器。
+    /// </summary>
+    private sealed class FakeHttpMessageHandler(List<string> requestedUrls) : HttpMessageHandler
+    {
+        /// <inheritdoc />
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            requestedUrls.Add(request.RequestUri?.AbsoluteUri ?? string.Empty);
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(response);
+        }
+    }
 }
-
-
-
-

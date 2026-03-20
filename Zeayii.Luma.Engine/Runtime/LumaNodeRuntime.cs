@@ -23,6 +23,14 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     private readonly SemaphoreSlim _childConcurrencyGate;
 
     /// <summary>
+    /// 节点请求执行闸门。
+    /// <para>
+    /// 仅在 Depth 节点启用，用于保证该节点请求/下载处理阶段串行执行。
+    /// </para>
+    /// </summary>
+    private readonly SemaphoreSlim? _requestExecutionGate;
+
+    /// <summary>
     /// 初始化节点运行时。
     /// </summary>
     /// <param name="node">抽象层节点。</param>
@@ -31,9 +39,9 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     /// <param name="runId">运行标识。</param>
     /// <param name="runName">运行名称。</param>
     /// <param name="commandName">命令名称。</param>
-    /// <param name="state">运行状态。</param>
+    /// <param name="state">节点状态。</param>
     /// <param name="htmlParser">HTML 解析器。</param>
-    /// <param name="cookieExecutor">Cookie 容器执行委托。</param>
+    /// <param name="cookieAccessor">Cookie 访问器。</param>
     /// <param name="loggerFactory">日志工厂。</param>
     /// <param name="parentToken">父级取消令牌。</param>
     public LumaNodeRuntime(
@@ -45,7 +53,7 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
         string commandName,
         TState state,
         IHtmlParser htmlParser,
-        CookieContainerExecutor cookieExecutor,
+        ICookieAccessor cookieAccessor,
         ILoggerFactory loggerFactory,
         CancellationToken parentToken)
     {
@@ -62,11 +70,15 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
             node.ExecutionOptions.DefaultRouteKind,
             state,
             htmlParser ?? throw new ArgumentNullException(nameof(htmlParser)),
-            cookieExecutor ?? throw new ArgumentNullException(nameof(cookieExecutor)),
+            cookieAccessor ?? throw new ArgumentNullException(nameof(cookieAccessor)),
             (loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory))).CreateLogger(node.GetType()),
             CancellationTokenSource.Token);
         State = new LumaNodeState();
-        _childConcurrencyGate = new SemaphoreSlim(Math.Max(1, Node.ExecutionOptions.ChildMaxConcurrency));
+        _childConcurrencyGate = new SemaphoreSlim(Node.ExecutionOptions.ResolveChildMaxConcurrency());
+        if (Node.ExecutionOptions.ChildTraversalPolicy == ChildTraversalPolicy.Depth)
+        {
+            _requestExecutionGate = new SemaphoreSlim(1, 1);
+        }
     }
 
     /// <summary>
@@ -118,6 +130,29 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     }
 
     /// <summary>
+    /// 进入节点请求执行闸门。
+    /// </summary>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>异步任务。</returns>
+    public Task WaitRequestExecutionSlotAsync(CancellationToken cancellationToken)
+    {
+        if (_requestExecutionGate is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return _requestExecutionGate.WaitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 释放节点请求执行闸门。
+    /// </summary>
+    public void ReleaseRequestExecutionSlot()
+    {
+        _requestExecutionGate?.Release();
+    }
+
+    /// <summary>
     /// 尝试取消当前节点。
     /// </summary>
     /// <param name="reason">停止原因。</param>
@@ -142,6 +177,7 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
         }
 
         _childConcurrencyGate.Dispose();
+        _requestExecutionGate?.Dispose();
         CancellationTokenSource.Dispose();
         return ValueTask.CompletedTask;
     }

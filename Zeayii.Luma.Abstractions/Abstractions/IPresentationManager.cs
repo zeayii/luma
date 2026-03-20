@@ -17,4 +17,3 @@ public interface IPresentationManager
     /// <returns>异步任务。</returns>
     ValueTask StopAsync();
 }
-

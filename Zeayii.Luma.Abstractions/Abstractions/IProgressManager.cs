@@ -22,4 +22,3 @@ public interface IProgressManager
     /// <returns>进度快照。</returns>
     ProgressSnapshot CreateSnapshot();
 }
-

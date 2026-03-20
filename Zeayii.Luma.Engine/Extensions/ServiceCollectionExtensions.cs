@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.CommandLine;
 using Zeayii.Luma.Engine.Configuration;
-using Zeayii.Luma.Engine.Downloading;
 using Zeayii.Luma.Engine.Engine;
 using Zeayii.Luma.Engine.Html;
 using System.Diagnostics.CodeAnalysis;
@@ -29,7 +28,6 @@ public static class ServiceCollectionExtensions
             ArgumentNullException.ThrowIfNull(options);
 
             services.TryAddSingleton(options);
-            services.TryAddSingleton(typeof(IDownloader<>), typeof(NetDownloader<>));
             services.TryAddSingleton<IHtmlParser, AngleSharpHtmlParser>();
             services.TryAddSingleton(typeof(LumaEngine<>));
             return services;
