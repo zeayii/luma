@@ -110,6 +110,31 @@ public sealed class LumaEngineCriticalTests
     }
 
     /// <summary>
+    ///     验证深度策略下会先完成当前子树持久化，再推进后续兄弟节点。
+    /// </summary>
+    [Fact]
+    public async Task RunAsyncShouldPersistDepthSubtreeBeforeNextSibling()
+    {
+        var aLeaf = new SnapshotTreeNode("A1", "A1");
+        var aNode = new SnapshotTreeNode("A", "A", NodeExecutionOptions.Depth(), aLeaf);
+        var bNode = new SnapshotTreeNode("B", "B");
+        var root = new SnapshotTreeNode("root", "Root", NodeExecutionOptions.Depth(), aNode, bNode);
+        var fixture = CreateFixture();
+
+        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-depth-persist-order", CancellationToken.None).ConfigureAwait(true);
+
+        var persistedIds = fixture.ItemSink.StoredBatches
+            .SelectMany(static batch => batch)
+            .Select(static envelope => ((TestItem)envelope.Item).Id)
+            .ToArray();
+
+        Assert.Equal(4, persistedIds.Length);
+        var indexA1 = Array.IndexOf(persistedIds, "A1");
+        var indexB = Array.IndexOf(persistedIds, "B");
+        Assert.True(indexA1 >= 0 && indexB >= 0 && indexA1 < indexB, $"PersistOrder={string.Join(',', persistedIds)}");
+    }
+
+    /// <summary>
     ///     创建测试夹具。
     /// </summary>
     private static EngineTestFixture CreateFixture()
@@ -342,6 +367,62 @@ public sealed class LumaEngineCriticalTests
         /// <inheritdoc />
         public override ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
         {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    ///     纯快照树节点（不发请求，仅在构建阶段产出数据项与子节点）。
+    /// </summary>
+    private sealed class SnapshotTreeNode : LumaNode<TestState>
+    {
+        /// <summary>
+        ///     节点执行选项。
+        /// </summary>
+        private readonly NodeExecutionOptions _executionOptions;
+
+        /// <summary>
+        ///     节点数据项标识。
+        /// </summary>
+        private readonly string _itemId;
+
+        /// <summary>
+        ///     子节点集合。
+        /// </summary>
+        private readonly IReadOnlyList<LumaNode<TestState>> _children;
+
+        /// <summary>
+        ///     初始化节点。
+        /// </summary>
+        public SnapshotTreeNode(string key, string itemId, NodeExecutionOptions? executionOptions = null, params LumaNode<TestState>[] children) : base(key)
+        {
+            _itemId = itemId;
+            _children = children;
+            _executionOptions = executionOptions ?? NodeExecutionOptions.Breadth();
+        }
+
+        /// <inheritdoc />
+        public override NodeExecutionOptions ExecutionOptions => _executionOptions;
+
+        /// <inheritdoc />
+        public override async IAsyncEnumerable<LumaRequest> BuildRequestsAsync(LumaContext<TestState> context)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            AddItem(new TestItem(_itemId));
+            foreach (var child in _children)
+            {
+                AddChild(child);
+            }
+
+            await Task.CompletedTask.ConfigureAwait(false);
+            yield break;
+        }
+
+        /// <inheritdoc />
+        public override ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
+        {
+            _ = response;
             context.CancellationToken.ThrowIfCancellationRequested();
             return ValueTask.CompletedTask;
         }

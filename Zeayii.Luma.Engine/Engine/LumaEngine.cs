@@ -97,6 +97,11 @@ public sealed class LumaEngine<TState>
     private long _storedItemCount;
 
     /// <summary>
+    ///     最近一次运行等待态日志时间戳（Unix 毫秒）。
+    /// </summary>
+    private long _lastRunWaitingLogTimestampMs;
+
+    /// <summary>
     ///     初始化引擎。
     /// </summary>
     /// <param name="itemSink">持久化入口。</param>
@@ -154,22 +159,17 @@ public sealed class LumaEngine<TState>
                 var effectiveRequestWorkerCount = ResolveEffectiveRequestWorkerCount(rootNode);
                 var requestScheduler = new NodeTaskScheduler(_options.RequestChannelCapacity, effectiveRequestWorkerCount);
                 var downloadScheduler = new NodeTaskScheduler(_options.DownloadChannelCapacity, _options.DownloadWorkerCount);
+                var effectivePersistWorkerCount = ResolveEffectivePersistWorkerCount(rootNode);
+                var persistScheduler = new PriorityTaskScheduler<ItemEnvelope<TState>>(_options.PersistChannelCapacity, effectivePersistWorkerCount);
                 var cookieAccessor = new NetCookieAccessor(_netClient, ResolveRouteKind);
 
                 try
                 {
-                    var persistChannel = Channel.CreateBounded<ItemEnvelope<TState>>(new BoundedChannelOptions(_options.PersistChannelCapacity)
-                    {
-                        SingleReader = false,
-                        SingleWriter = false,
-                        FullMode = BoundedChannelFullMode.Wait
-                    });
-
-                    var persistWorkers = Enumerable.Range(0, _options.PersistWorkerCount).Select(_ => PersistWorkerAsync(persistChannel.Reader, runRuntime)).ToArray();
-                    var requestWorkers = Enumerable.Range(0, effectiveRequestWorkerCount).Select(_ => RequestWorkerAsync(requestScheduler, downloadScheduler, persistChannel.Writer, runRuntime)).ToArray();
-                    var downloadWorkers = Enumerable.Range(0, _options.DownloadWorkerCount).Select(_ => DownloadWorkerAsync(downloadScheduler, requestScheduler, persistChannel.Writer, runRuntime)).ToArray();
+                    var persistWorkers = Enumerable.Range(0, effectivePersistWorkerCount).Select(_ => PersistWorkerAsync(persistScheduler, runRuntime)).ToArray();
+                    var requestWorkers = Enumerable.Range(0, effectiveRequestWorkerCount).Select(_ => RequestWorkerAsync(requestScheduler, downloadScheduler, persistScheduler, runRuntime)).ToArray();
+                    var downloadWorkers = Enumerable.Range(0, _options.DownloadWorkerCount).Select(_ => DownloadWorkerAsync(downloadScheduler, requestScheduler, persistScheduler, runRuntime)).ToArray();
                     var snapshotTask = PublishSnapshotsLoopAsync(runRuntime, requestScheduler, downloadScheduler);
-                    await RegisterNodeAsync(rootNode, rootState, null, runRuntime, cookieAccessor, requestScheduler, persistChannel.Writer, false).ConfigureAwait(false);
+                    await RegisterNodeAsync(rootNode, rootState, null, runRuntime, cookieAccessor, requestScheduler, persistScheduler, false).ConfigureAwait(false);
 
                     try
                     {
@@ -190,7 +190,7 @@ public sealed class LumaEngine<TState>
                         downloadScheduler.Complete();
                         await Task.WhenAll(requestWorkers).ConfigureAwait(false);
                         await Task.WhenAll(downloadWorkers).ConfigureAwait(false);
-                        persistChannel.Writer.TryComplete();
+                        persistScheduler.Complete();
                         await Task.WhenAll(persistWorkers).ConfigureAwait(false);
 
                         if (string.Equals(runRuntime.Status, "Running", StringComparison.Ordinal)) runRuntime.SetStatus("Completed");
@@ -208,6 +208,7 @@ public sealed class LumaEngine<TState>
                 {
                     requestScheduler.Dispose();
                     downloadScheduler.Dispose();
+                    persistScheduler.Dispose();
                 }
             }
         }
@@ -226,6 +227,7 @@ public sealed class LumaEngine<TState>
         Interlocked.Exchange(ref _activeNetworkCount, 0);
         Interlocked.Exchange(ref _storedItemCount, 0);
         Interlocked.Exchange(ref _initializingNodeCount, 0);
+        Interlocked.Exchange(ref _lastRunWaitingLogTimestampMs, 0);
         while (_stateSignalChannel.Reader.TryRead(out _))
         {
         }
@@ -240,7 +242,7 @@ public sealed class LumaEngine<TState>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <param name="cookieAccessor">Cookie 访问器。</param>
     /// <param name="requestScheduler">普通请求调度器。</param>
-    /// <param name="persistWriter">持久化通道写入器。</param>
+    /// <param name="persistScheduler">持久化调度器。</param>
     /// <param name="prioritizeRequests">是否优先入队普通请求。</param>
     /// <returns>异步任务。</returns>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "引擎需隔离节点异常，保证主流程可持续。")]
@@ -251,7 +253,7 @@ public sealed class LumaEngine<TState>
         LumaRunRuntime runRuntime,
         ICookieAccessor cookieAccessor,
         NodeTaskScheduler requestScheduler,
-        ChannelWriter<ItemEnvelope<TState>> persistWriter,
+        PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler,
         bool prioritizeRequests)
     {
         var path = string.IsNullOrWhiteSpace(parentPath) ? node.Key : $"{parentPath}/{node.Key}";
@@ -273,7 +275,7 @@ public sealed class LumaEngine<TState>
         {
             runtime.State.SetStatus(NodeExecutionStatus.Running);
             await BuildNodeRequestsAsync(runtime, requestScheduler, runRuntime.Token, prioritizeRequests).ConfigureAwait(false);
-            await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistWriter, null, prioritizeRequests).ConfigureAwait(false);
+            await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistScheduler, null).ConfigureAwait(false);
         }
         catch (LumaStopException stopException)
         {
@@ -323,11 +325,11 @@ public sealed class LumaEngine<TState>
     /// </summary>
     /// <param name="requestScheduler">普通请求调度器。</param>
     /// <param name="downloadScheduler">下载请求调度器。</param>
-    /// <param name="persistWriter">持久化通道写入器。</param>
+    /// <param name="persistScheduler">持久化调度器。</param>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <returns>异步任务。</returns>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "工作循环需兜底节点异常，避免单任务中断全局管线。")]
-    private async Task RequestWorkerAsync(NodeTaskScheduler requestScheduler, NodeTaskScheduler downloadScheduler, ChannelWriter<ItemEnvelope<TState>> persistWriter, LumaRunRuntime runRuntime)
+    private async Task RequestWorkerAsync(NodeTaskScheduler requestScheduler, NodeTaskScheduler downloadScheduler, PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler, LumaRunRuntime runRuntime)
     {
         try
         {
@@ -357,7 +359,7 @@ public sealed class LumaEngine<TState>
                     enteredExecutionSlot = true;
                     using var response = await SendAsync(request, runtime.Context, runtime.Context.CancellationToken).ConfigureAwait(false);
                     await runtime.Node.HandleResponseAsync(response, runtime.Context).ConfigureAwait(false);
-                    await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistWriter, request, false).ConfigureAwait(false);
+                    await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistScheduler, request).ConfigureAwait(false);
 
                     bool shouldDownload;
                     try
@@ -378,7 +380,8 @@ public sealed class LumaEngine<TState>
                             await foreach (var downloadRequest in runtime.Node.BuildDownloadRequestsAsync(response, runtime.Context).WithCancellation(runtime.Context.CancellationToken).ConfigureAwait(false))
                             {
                                 var normalizedDownloadRequest = NormalizeRequest(downloadRequest, runtime.Path);
-                                await downloadScheduler.EnqueueAsync(normalizedDownloadRequest, false, runRuntime.Token).ConfigureAwait(false);
+                                var prioritizeDownloads = runtime.Node.ExecutionOptions.ChildTraversalPolicy == ChildTraversalPolicy.Depth;
+                                await downloadScheduler.EnqueueAsync(normalizedDownloadRequest, prioritizeDownloads, runRuntime.Token).ConfigureAwait(false);
                                 runtime.State.IncrementQueued();
                                 SignalStateChanged();
                             }
@@ -388,7 +391,7 @@ public sealed class LumaEngine<TState>
                             if (!await HandleNodeExceptionAsync(runtime, runRuntime, exception, NodeExceptionPhase.BuildDownloadRequests, request, response, null).ConfigureAwait(false)) throw;
                         }
 
-                        await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistWriter, request, false).ConfigureAwait(false);
+                        await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistScheduler, request).ConfigureAwait(false);
                     }
                 }
                 catch (LumaStopException stopException)
@@ -427,11 +430,11 @@ public sealed class LumaEngine<TState>
     ///     下载请求工作循环。
     /// </summary>
     /// <param name="downloadScheduler">下载请求调度器。</param>
-    /// <param name="persistWriter">持久化通道写入器。</param>
+    /// <param name="persistScheduler">持久化调度器。</param>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <returns>异步任务。</returns>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "下载循环需兜底节点异常，避免单任务中断全局管线。")]
-    private async Task DownloadWorkerAsync(NodeTaskScheduler downloadScheduler, NodeTaskScheduler requestScheduler, ChannelWriter<ItemEnvelope<TState>> persistWriter, LumaRunRuntime runRuntime)
+    private async Task DownloadWorkerAsync(NodeTaskScheduler downloadScheduler, NodeTaskScheduler requestScheduler, PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler, LumaRunRuntime runRuntime)
     {
         try
         {
@@ -461,7 +464,7 @@ public sealed class LumaEngine<TState>
                     enteredExecutionSlot = true;
                     using var response = await SendAsync(request, runtime.Context, runtime.Context.CancellationToken).ConfigureAwait(false);
                     await runtime.Node.HandleDownloadResponseAsync(response, request, runtime.Context).ConfigureAwait(false);
-                    await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistWriter, request, false).ConfigureAwait(false);
+                    await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistScheduler, request).ConfigureAwait(false);
                 }
                 catch (LumaStopException stopException)
                 {
@@ -501,28 +504,38 @@ public sealed class LumaEngine<TState>
     /// <param name="runtime">节点运行时。</param>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <param name="requestScheduler">普通请求调度器。</param>
-    /// <param name="persistWriter">持久化通道写入器。</param>
+    /// <param name="persistScheduler">持久化调度器。</param>
     /// <param name="sourceRequest">源请求。</param>
-    /// <param name="prioritizeRequests">是否优先入队。</param>
     /// <returns>异步任务。</returns>
-    private async Task DispatchNodeBatchAsync(LumaNodeRuntime<TState> runtime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler, ChannelWriter<ItemEnvelope<TState>> persistWriter, LumaRequest? sourceRequest,
-        bool prioritizeRequests)
+    private async Task DispatchNodeBatchAsync(LumaNodeRuntime<TState> runtime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler, PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler,
+        LumaRequest? sourceRequest)
     {
         var dispatchBatch = runtime.Node.DrainDispatchBatch();
+        var prioritizeOutputs = runtime.Node.ExecutionOptions.ChildTraversalPolicy == ChildTraversalPolicy.Depth;
+        if (dispatchBatch.Requests.Count > 0 || dispatchBatch.Items.Count > 0 || dispatchBatch.Children.Count > 0)
+        {
+            _logManager.Write(
+                LogLevelKind.Debug,
+                "Scheduler",
+                $"Event=DispatchBatchPrepared NodePath={runtime.Path} TraversalPolicy={runtime.Node.ExecutionOptions.ChildTraversalPolicy} PrioritizeOutputs={prioritizeOutputs} RequestCount={dispatchBatch.Requests.Count} ItemCount={dispatchBatch.Items.Count} ChildCount={dispatchBatch.Children.Count}");
+        }
 
         if (dispatchBatch.StopNode) runtime.Cancel(dispatchBatch.StopReason);
 
         foreach (var request in dispatchBatch.Requests)
         {
             var normalizedRequest = NormalizeRequest(request, runtime.Path);
-            await requestScheduler.EnqueueAsync(normalizedRequest, prioritizeRequests, runRuntime.Token).ConfigureAwait(false);
+            await requestScheduler.EnqueueAsync(normalizedRequest, prioritizeOutputs, runRuntime.Token).ConfigureAwait(false);
             runtime.State.IncrementQueued();
             SignalStateChanged();
         }
 
-        foreach (var item in dispatchBatch.Items) await persistWriter.WriteAsync(new ItemEnvelope<TState>(item, runtime.Context, sourceRequest), runRuntime.Token).ConfigureAwait(false);
+        foreach (var item in dispatchBatch.Items)
+        {
+            await persistScheduler.EnqueueAsync(new ItemEnvelope<TState>(item, runtime.Context, sourceRequest), prioritizeOutputs, runRuntime.Token).ConfigureAwait(false);
+        }
 
-        if (dispatchBatch.Children.Count > 0) await RegisterChildrenAsync(dispatchBatch.Children, runtime, runRuntime, requestScheduler, persistWriter).ConfigureAwait(false);
+        if (dispatchBatch.Children.Count > 0) await RegisterChildrenAsync(dispatchBatch.Children, runtime, runRuntime, requestScheduler, persistScheduler).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -532,10 +545,10 @@ public sealed class LumaEngine<TState>
     /// <param name="parentRuntime">父节点运行时。</param>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <param name="requestScheduler">普通请求调度器。</param>
-    /// <param name="persistWriter">持久化通道写入器。</param>
+    /// <param name="persistScheduler">持久化调度器。</param>
     /// <returns>异步任务。</returns>
     private async Task RegisterChildrenAsync(IReadOnlyList<NodeChildBinding<TState>> children, LumaNodeRuntime<TState> parentRuntime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler,
-        ChannelWriter<ItemEnvelope<TState>> persistWriter)
+        PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler)
     {
         var traversalPolicy = parentRuntime.Node.ExecutionOptions.ChildTraversalPolicy;
         var prioritizeRequests = traversalPolicy == ChildTraversalPolicy.Depth;
@@ -544,7 +557,7 @@ public sealed class LumaEngine<TState>
         foreach (var childBinding in children)
         {
             await parentRuntime.WaitChildSlotAsync(runRuntime.Token).ConfigureAwait(false);
-            tasks.Add(RegisterChildInternalAsync(childBinding, parentRuntime, runRuntime, requestScheduler, persistWriter, prioritizeRequests));
+            tasks.Add(RegisterChildInternalAsync(childBinding, parentRuntime, runRuntime, requestScheduler, persistScheduler, prioritizeRequests));
         }
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -557,17 +570,17 @@ public sealed class LumaEngine<TState>
     /// <param name="parentRuntime">父节点运行时。</param>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <param name="requestScheduler">普通请求调度器。</param>
-    /// <param name="persistWriter">持久化通道写入器。</param>
+    /// <param name="persistScheduler">持久化调度器。</param>
     /// <param name="prioritizeRequests">是否优先入队。</param>
     /// <returns>异步任务。</returns>
     private async Task RegisterChildInternalAsync(NodeChildBinding<TState> childBinding, LumaNodeRuntime<TState> parentRuntime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler,
-        ChannelWriter<ItemEnvelope<TState>> persistWriter, bool prioritizeRequests)
+        PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler, bool prioritizeRequests)
     {
         try
         {
             var childState = childBinding.StateMapper(parentRuntime.Context.State);
             var cookieAccessor = new NetCookieAccessor(_netClient, ResolveRouteKind);
-            await RegisterNodeAsync(childBinding.Node, childState, parentRuntime.Path, runRuntime, cookieAccessor, requestScheduler, persistWriter, prioritizeRequests).ConfigureAwait(false);
+            await RegisterNodeAsync(childBinding.Node, childState, parentRuntime.Path, runRuntime, cookieAccessor, requestScheduler, persistScheduler, prioritizeRequests).ConfigureAwait(false);
         }
         finally
         {
@@ -639,18 +652,18 @@ public sealed class LumaEngine<TState>
     /// <summary>
     ///     持久化工作循环。
     /// </summary>
-    /// <param name="reader">持久化通道读取器。</param>
+    /// <param name="persistScheduler">持久化调度器。</param>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <returns>异步任务。</returns>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "持久化循环需要吞吐保护，避免单批次失败中断全局。")]
-    private async Task PersistWorkerAsync(ChannelReader<ItemEnvelope<TState>> reader, LumaRunRuntime runRuntime)
+    private async Task PersistWorkerAsync(PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler, LumaRunRuntime runRuntime)
     {
         var buffer = new List<ItemEnvelope<TState>>(_options.PersistBatchSize);
         try
         {
-            while (await TryReadPersistEnvelopeAsync(reader, buffer, runRuntime.Token).ConfigureAwait(false))
+            while (await TryReadPersistEnvelopeAsync(persistScheduler, buffer, runRuntime.Token).ConfigureAwait(false))
             {
-                await FillPersistBatchAsync(reader, buffer).ConfigureAwait(false);
+                FillPersistBatchAsync(persistScheduler, buffer);
                 await FlushPersistBatchAsync(buffer, runRuntime, runRuntime.Token).ConfigureAwait(false);
                 SignalStateChanged();
             }
@@ -679,47 +692,37 @@ public sealed class LumaEngine<TState>
     /// <summary>
     ///     尝试读取一条持久化信封。
     /// </summary>
-    /// <param name="reader">读取器。</param>
+    /// <param name="persistScheduler">持久化调度器。</param>
     /// <param name="buffer">缓冲区。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>读取成功返回 true。</returns>
-    private static async ValueTask<bool> TryReadPersistEnvelopeAsync(ChannelReader<ItemEnvelope<TState>> reader, List<ItemEnvelope<TState>> buffer, CancellationToken cancellationToken)
+    private static async ValueTask<bool> TryReadPersistEnvelopeAsync(PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler, List<ItemEnvelope<TState>> buffer, CancellationToken cancellationToken)
     {
-        if (!reader.TryRead(out var envelope) && (!await reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false) || !reader.TryRead(out envelope))) return false;
-
-        buffer.Add(envelope);
+        var dequeueResult = await persistScheduler.DequeueAsync(cancellationToken).ConfigureAwait(false);
+        if (!dequeueResult.HasItem)
+        {
+            return false;
+        }
+        buffer.Add(dequeueResult.Item);
         return true;
     }
 
     /// <summary>
     ///     聚合批量持久化数据。
     /// </summary>
-    /// <param name="reader">读取器。</param>
+    /// <param name="persistScheduler">持久化调度器。</param>
     /// <param name="buffer">缓冲区。</param>
-    /// <returns>异步任务。</returns>
-    private async Task FillPersistBatchAsync(ChannelReader<ItemEnvelope<TState>> reader, List<ItemEnvelope<TState>> buffer)
+    private void FillPersistBatchAsync(PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler, List<ItemEnvelope<TState>> buffer)
     {
         if (buffer.Count <= 0 || buffer.Count >= _options.PersistBatchSize) return;
-
-        var deadlineUtc = DateTimeOffset.UtcNow + _options.PersistFlushInterval;
         while (buffer.Count < _options.PersistBatchSize)
         {
-            while (buffer.Count < _options.PersistBatchSize && reader.TryRead(out var envelope)) buffer.Add(envelope);
-
-            if (buffer.Count >= _options.PersistBatchSize) return;
-
-            var remaining = deadlineUtc - DateTimeOffset.UtcNow;
-            if (remaining <= TimeSpan.Zero) return;
-
-            try
-            {
-                var canRead = await reader.WaitToReadAsync().AsTask().WaitAsync(remaining).ConfigureAwait(false);
-                if (!canRead) return;
-            }
-            catch (TimeoutException)
+            if (!persistScheduler.TryDequeue(out var envelope))
             {
                 return;
             }
+
+            buffer.Add(envelope);
         }
     }
 
@@ -802,6 +805,10 @@ public sealed class LumaEngine<TState>
         if (batchPersistResults.Count != filteredEnvelopes.Count) throw new InvalidOperationException("Persist batch result count must match filtered input count.");
 
         for (var resultIndex = 0; resultIndex < persistedIndexes.Count; resultIndex++) resolvedResults[persistedIndexes[resultIndex]] = batchPersistResults[resultIndex];
+        _logManager.Write(
+            LogLevelKind.Debug,
+            "Persist",
+            $"Event=PersistBatchResolved BufferedCount={buffer.Count} PersistedCount={filteredEnvelopes.Count} ResultCount={batchPersistResults.Count}");
 
         for (var index = 0; index < buffer.Count; index++)
         {
@@ -885,6 +892,8 @@ public sealed class LumaEngine<TState>
                 return;
             }
 
+            TryWriteRunWaitingLog(requestScheduler, downloadScheduler);
+
             await _stateSignalChannel.Reader.ReadAsync(runRuntime.Token).ConfigureAwait(false);
             while (_stateSignalChannel.Reader.TryRead(out _))
             {
@@ -915,6 +924,31 @@ public sealed class LumaEngine<TState>
     private void SignalStateChanged()
     {
         _stateSignalChannel.Writer.TryWrite(true);
+    }
+
+    /// <summary>
+    ///     记录运行等待态日志（节流）。
+    /// </summary>
+    /// <param name="requestScheduler">普通请求调度器。</param>
+    /// <param name="downloadScheduler">下载请求调度器。</param>
+    private void TryWriteRunWaitingLog(NodeTaskScheduler requestScheduler, NodeTaskScheduler downloadScheduler)
+    {
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var lastMs = Interlocked.Read(ref _lastRunWaitingLogTimestampMs);
+        if (nowMs - lastMs < 5000)
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _lastRunWaitingLogTimestampMs, nowMs, lastMs) != lastMs)
+        {
+            return;
+        }
+
+        _logManager.Write(
+            LogLevelKind.Debug,
+            "Engine",
+            $"Event=RunWaitingState InitializingNodeCount={Interlocked.Read(ref _initializingNodeCount)} QueuedRequestCount={requestScheduler.Count} QueuedDownloadCount={downloadScheduler.Count} ActiveNetworkCount={Interlocked.Read(ref _activeNetworkCount)}");
     }
 
     /// <summary>
@@ -1005,6 +1039,22 @@ public sealed class LumaEngine<TState>
         if (rootNode.ExecutionOptions.ChildTraversalPolicy != ChildTraversalPolicy.Depth) return configuredWorkerCount;
 
         if (configuredWorkerCount > 1) _logManager.Write(LogLevelKind.Warning, "Engine", $"Depth traversal detected. RequestWorkerCount forced from {configuredWorkerCount} to 1 for strict pre-order traversal.");
+
+        return 1;
+    }
+
+    /// <summary>
+    ///     解析有效持久化工作线程数量。
+    /// </summary>
+    /// <param name="rootNode">根节点。</param>
+    /// <returns>有效线程数量。</returns>
+    private int ResolveEffectivePersistWorkerCount(LumaNode<TState> rootNode)
+    {
+        ArgumentNullException.ThrowIfNull(rootNode);
+        var configuredWorkerCount = Math.Max(1, _options.PersistWorkerCount);
+        if (rootNode.ExecutionOptions.ChildTraversalPolicy != ChildTraversalPolicy.Depth) return configuredWorkerCount;
+
+        if (configuredWorkerCount > 1) _logManager.Write(LogLevelKind.Warning, "Engine", $"Depth traversal detected. PersistWorkerCount forced from {configuredWorkerCount} to 1 for ordered persistence dispatch.");
 
         return 1;
     }

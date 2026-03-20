@@ -26,9 +26,17 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(options);
 
         services.TryAddSingleton(options);
-        services.TryAddSingleton<ILogManager, LogManager>();
+        if (options.MinimumLogLevel == LogLevel.None)
+        {
+            services.TryAddSingleton<ILogManager, NullLogManager>();
+        }
+        else
+        {
+            services.TryAddSingleton<ILogManager, LogManager>();
+            services.TryAddEnumerable(ServiceDescriptor.Singleton<ILoggerProvider, PresentationLoggerProvider>());
+        }
+
         services.TryAddSingleton<IProgressManager, ProgressManager>();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ILoggerProvider, PresentationLoggerProvider>());
         services.TryAddSingleton<IPresentationManager, PresentationManager>();
         return services;
     }
