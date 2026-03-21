@@ -52,11 +52,6 @@ internal sealed class CommonCommandOptions
     public required Option<NetLogLevel> NetLogLevelOption { get; init; }
 
     /// <summary>
-    ///     品牌标题参数。
-    /// </summary>
-    public required Option<string> HeaderBrandOption { get; init; }
-
-    /// <summary>
     ///     日志最大行数参数。
     /// </summary>
     public required Option<int> MaxLogEntriesOption { get; init; }

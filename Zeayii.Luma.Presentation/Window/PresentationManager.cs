@@ -121,10 +121,25 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     }
 
     /// <summary>
+    ///     节点区域固定宽度（字符列）。
+    /// </summary>
+    private const int NodesPanelFixedWidth = 92;
+
+    /// <summary>
+    ///     日志区域最小宽度（字符列）。
+    /// </summary>
+    private const int LogsPanelMinimumWidth = 40;
+
+    /// <summary>
+    ///     节点区域最小宽度（字符列）。
+    /// </summary>
+    private const int NodesPanelMinimumWidth = 28;
+
+    /// <summary>
     ///     渲染整个窗口。
     /// </summary>
     /// <returns>可渲染对象。</returns>
-    private Rows Render()
+    private IRenderable Render()
     {
         logManager.DrainPendingEntries();
         var progressSnapshot = progressManager.CreateSnapshot();
@@ -140,7 +155,8 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
             $"[grey]Elapsed:[/] [blue]{progressSnapshot.Elapsed:hh\\:mm\\:ss}[/]"))
         {
             Border = BoxBorder.Rounded,
-            Header = new PanelHeader(" Runtime ")
+            Header = new PanelHeader(" Runtime "),
+            Expand = true
         };
 
         var visibleNodes = SelectNodes(progressSnapshot.Nodes);
@@ -160,9 +176,28 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
             Expand = true
         };
 
-        return new Rows(
-            header,
-            new Columns(leftPanel, rightPanel) { Expand = true });
+        var terminalWidth = AnsiConsole.Profile.Width;
+        var maxNodesWidth = Math.Max(NodesPanelMinimumWidth, terminalWidth - LogsPanelMinimumWidth);
+        var effectiveNodesWidth = Math.Min(NodesPanelFixedWidth, maxNodesWidth);
+
+        var layout = new Layout("Root");
+        layout.SplitRows(
+            new Layout("Header")
+            {
+                Size = 3
+            },
+            new Layout("Body"));
+        layout["Body"].SplitColumns(
+            new Layout("Nodes")
+            {
+                Size = effectiveNodesWidth
+            },
+            new Layout("Logs"));
+
+        layout["Header"].Update(header);
+        layout["Nodes"].Update(leftPanel);
+        layout["Logs"].Update(rightPanel);
+        return layout;
     }
 
     /// <summary>

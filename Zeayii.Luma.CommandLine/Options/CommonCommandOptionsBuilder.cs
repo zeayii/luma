@@ -15,6 +15,11 @@ namespace Zeayii.Luma.CommandLine.Options;
 internal static class CommonCommandOptionsBuilder
 {
     /// <summary>
+    ///     固定品牌标题文本。
+    /// </summary>
+    private const string FixedHeaderBrand = "Zeayii Luma";
+
+    /// <summary>
     ///     将通用参数添加到命令对象。
     /// </summary>
     /// <param name="command">命令对象。</param>
@@ -33,7 +38,6 @@ internal static class CommonCommandOptionsBuilder
             LogTotalSizeMegabytesOption = CreateOption("--log-total-size-mb", "日志总大小上限（MB）。", 300),
             LogFileSizeMegabytesOption = CreateOption("--log-file-size-mb", "单日志文件大小上限（MB）。", 20),
             NetLogLevelOption = CreateOption("--net-log-level", "网络模块日志等级。", NetLogLevel.Info),
-            HeaderBrandOption = CreateOption("--header-brand", "窗口标题品牌文本。", "Luma"),
             MaxLogEntriesOption = CreateOption("--max-log-entries", "窗口日志最大行数。", 1000),
             RefreshIntervalMillisecondsOption = CreateOption("--refresh-interval-ms", "窗口刷新间隔（毫秒）。", 150),
             DownloadWorkerCountOption = CreateOption("--download-workers", "下载工作协程数量。", 4),
@@ -134,7 +138,6 @@ internal static class CommonCommandOptionsBuilder
         Add(command, options.LogTotalSizeMegabytesOption);
         Add(command, options.LogFileSizeMegabytesOption);
         Add(command, options.NetLogLevelOption);
-        Add(command, options.HeaderBrandOption);
         Add(command, options.MaxLogEntriesOption);
         Add(command, options.RefreshIntervalMillisecondsOption);
         Add(command, options.DownloadWorkerCountOption);
@@ -200,7 +203,7 @@ internal static class CommonCommandOptionsBuilder
             LogTotalSizeMegabytes = parseResult.GetValue(options.LogTotalSizeMegabytesOption),
             LogFileSizeMegabytes = parseResult.GetValue(options.LogFileSizeMegabytesOption),
             NetLogLevel = parseResult.GetValue(options.NetLogLevelOption),
-            HeaderBrand = parseResult.GetValue(options.HeaderBrandOption) ?? "Luma",
+            HeaderBrand = FixedHeaderBrand,
             MaxLogEntries = parseResult.GetValue(options.MaxLogEntriesOption),
             RefreshIntervalMilliseconds = parseResult.GetValue(options.RefreshIntervalMillisecondsOption),
             DownloadWorkerCount = parseResult.GetValue(options.DownloadWorkerCountOption),
