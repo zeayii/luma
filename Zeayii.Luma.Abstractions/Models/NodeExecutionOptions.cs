@@ -3,28 +3,26 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// <summary>
 ///     <b>节点执行选项</b>
 ///     <para>
-///         定义节点在子节点调度与请求路由上的执行策略。
+///         定义节点在子节点结构化并发与请求路由上的执行策略。
 ///     </para>
 /// </summary>
 public sealed class NodeExecutionOptions
 {
     /// <summary>
-    ///     初始化节点执行选项。
-    /// </summary>
-    /// <param name="defaultRouteKind">节点默认路由类型。</param>
-    /// <param name="childTraversalPolicy">子节点遍历策略。</param>
-    /// <param name="breadthMaxConcurrency">广度策略下的子节点并发上限。</param>
-    private NodeExecutionOptions(LumaRouteKind defaultRouteKind, ChildTraversalPolicy childTraversalPolicy, int breadthMaxConcurrency)
+///     初始化节点执行选项。
+/// </summary>
+/// <param name="defaultRouteKind">节点默认路由类型。</param>
+/// <param name="childMaxConcurrency">子节点并发上限。</param>
+    public NodeExecutionOptions(LumaRouteKind defaultRouteKind = LumaRouteKind.Auto, int childMaxConcurrency = 1)
     {
         DefaultRouteKind = defaultRouteKind;
-        ChildTraversalPolicy = childTraversalPolicy;
-        BreadthMaxConcurrency = Math.Max(1, breadthMaxConcurrency);
+        ChildMaxConcurrency = Math.Max(1, childMaxConcurrency);
     }
 
     /// <summary>
     ///     默认执行选项。
     /// </summary>
-    public static NodeExecutionOptions Default { get; } = Breadth();
+    public static NodeExecutionOptions Default { get; } = new();
 
     /// <summary>
     ///     节点默认路由类型。
@@ -32,38 +30,9 @@ public sealed class NodeExecutionOptions
     public LumaRouteKind DefaultRouteKind { get; }
 
     /// <summary>
-    ///     子节点遍历策略。
-    /// </summary>
-    public ChildTraversalPolicy ChildTraversalPolicy { get; }
-
-    /// <summary>
-    ///     广度策略下的子节点并发上限。
-    ///     <para>
-    ///         深度策略下该值不会生效，实际并发固定为 1。
-    ///     </para>
-    /// </summary>
-    public int BreadthMaxConcurrency { get; }
-
-    /// <summary>
-    ///     创建深度优先执行选项。
-    /// </summary>
-    /// <param name="defaultRouteKind">节点默认路由类型。</param>
-    /// <returns>执行选项。</returns>
-    public static NodeExecutionOptions Depth(LumaRouteKind defaultRouteKind = LumaRouteKind.Auto)
-    {
-        return new NodeExecutionOptions(defaultRouteKind, ChildTraversalPolicy.Depth, 1);
-    }
-
-    /// <summary>
-    ///     创建广度优先执行选项。
-    /// </summary>
-    /// <param name="defaultRouteKind">节点默认路由类型。</param>
-    /// <param name="breadthMaxConcurrency">子节点并发上限。</param>
-    /// <returns>执行选项。</returns>
-    public static NodeExecutionOptions Breadth(LumaRouteKind defaultRouteKind = LumaRouteKind.Auto, int breadthMaxConcurrency = 1)
-    {
-        return new NodeExecutionOptions(defaultRouteKind, ChildTraversalPolicy.Breadth, breadthMaxConcurrency);
-    }
+    ///     子节点并发上限。
+/// </summary>
+    public int ChildMaxConcurrency { get; }
 
     /// <summary>
     ///     解析当前节点可用的子节点并发上限。
@@ -71,6 +40,6 @@ public sealed class NodeExecutionOptions
     /// <returns>子节点并发上限。</returns>
     public int ResolveChildMaxConcurrency()
     {
-        return ChildTraversalPolicy == ChildTraversalPolicy.Depth ? 1 : Math.Max(1, BreadthMaxConcurrency);
+        return Math.Max(1, ChildMaxConcurrency);
     }
 }

@@ -42,7 +42,7 @@ public sealed class LumaEngineResilienceTests
         var children = Enumerable.Range(0, 8)
             .Select(index => (LumaNode<TestState>)new DelayBuildNode($"child-{index}", probe, TimeSpan.FromMilliseconds(60)))
             .ToArray();
-        var root = new ParentNode("root", NodeExecutionOptions.Breadth(LumaRouteKind.Auto, 2), children);
+        var root = new ParentNode("root", new NodeExecutionOptions(LumaRouteKind.Auto, 2), children);
         var fixture = CreateFixture();
 
         await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-concurrency", CancellationToken.None).ConfigureAwait(true);
@@ -115,7 +115,7 @@ public sealed class LumaEngineResilienceTests
     {
         var stopNode = new NodeScopedStopNode("stop-child");
         var keepNode = new SingleItemNode("keep-child", "https://example.com/keep", new TestItem("K"));
-        var root = new ParentNode("root", NodeExecutionOptions.Breadth(), stopNode, keepNode);
+        var root = new ParentNode("root", new NodeExecutionOptions(LumaRouteKind.Auto, 1), stopNode, keepNode);
         var fixture = CreateFixture();
 
         await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-node-stop-scope", CancellationToken.None).ConfigureAwait(true);
@@ -131,7 +131,7 @@ public sealed class LumaEngineResilienceTests
     {
         var stopNode = new RunScopedStopNode("stop-run");
         var keepNode = new SingleItemNode("keep-child", "https://example.com/keep", new TestItem("K"));
-        var root = new ParentNode("root", NodeExecutionOptions.Breadth(), stopNode, keepNode);
+        var root = new ParentNode("root", new NodeExecutionOptions(LumaRouteKind.Auto, 1), stopNode, keepNode);
         var fixture = CreateFixture();
 
         await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-global-stop-scope", CancellationToken.None).ConfigureAwait(true);

@@ -3,7 +3,7 @@ namespace Zeayii.Luma.Engine.Scheduling;
 /// <summary>
 ///     <b>通用任务调度器</b>
 ///     <para>
-///         支持优先队列（Depth）与普通队列（Breadth）的统一调度语义。
+///         支持 FIFO 调度语义。
 ///     </para>
 /// </summary>
 /// <typeparam name="TItem">任务项类型。</typeparam>
@@ -30,11 +30,6 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
     ///     普通队列。
     /// </summary>
     private readonly LinkedList<TItem> _normalQueue = [];
-
-    /// <summary>
-    ///     优先队列。
-    /// </summary>
-    private readonly LinkedList<TItem> _priorityQueue = [];
 
     /// <summary>
     ///     队列同步锁。
@@ -69,10 +64,9 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
     ///     入队。
     /// </summary>
     /// <param name="item">任务项。</param>
-    /// <param name="prioritize">是否走优先队列。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>异步任务。</returns>
-    public async ValueTask EnqueueAsync(TItem item, bool prioritize, CancellationToken cancellationToken)
+    public async ValueTask EnqueueAsync(TItem item, CancellationToken cancellationToken)
     {
         if (Volatile.Read(ref _completed) != 0)
         {
@@ -90,14 +84,7 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
 
             lock (_syncRoot)
             {
-                if (prioritize)
-                {
-                    _priorityQueue.AddLast(item);
-                }
-                else
-                {
-                    _normalQueue.AddLast(item);
-                }
+                _normalQueue.AddLast(item);
 
                 Interlocked.Increment(ref _count);
             }
@@ -130,12 +117,7 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
             lock (_syncRoot)
             {
                 LinkedListNode<TItem>? node = null;
-                if (_priorityQueue.Last is not null)
-                {
-                    node = _priorityQueue.Last;
-                    _priorityQueue.RemoveLast();
-                }
-                else if (_normalQueue.First is not null)
+                if (_normalQueue.First is not null)
                 {
                     node = _normalQueue.First;
                     _normalQueue.RemoveFirst();
@@ -166,12 +148,7 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
         lock (_syncRoot)
         {
             LinkedListNode<TItem>? node = null;
-            if (_priorityQueue.Last is not null)
-            {
-                node = _priorityQueue.Last;
-                _priorityQueue.RemoveLast();
-            }
-            else if (_normalQueue.First is not null)
+            if (_normalQueue.First is not null)
             {
                 node = _normalQueue.First;
                 _normalQueue.RemoveFirst();

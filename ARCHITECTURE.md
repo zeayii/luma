@@ -51,7 +51,6 @@
 - `StopNode` / `StopReason`
 
 2. `NodeExecutionOptions`
-- `ChildTraversalPolicy`：`Breadth` / `Depth`
 - `ChildMaxConcurrency`
 
 3. `LumaContext<TState>`
@@ -91,7 +90,7 @@ sequenceDiagram
 
 1. 全局并发由引擎统一控制。
 2. 子节点并发由节点 `ChildMaxConcurrency` 声明。
-3. 子节点遍历顺序由节点 `ChildTraversalPolicy` 声明。
+3. 子节点扩展并发由节点 `ChildMaxConcurrency` 声明。
 4. 队列背压由调度器实现，避免无限入队。
 
 ## 7. 设计约束

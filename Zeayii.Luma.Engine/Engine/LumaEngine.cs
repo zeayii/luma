@@ -205,7 +205,7 @@ public sealed class LumaEngine<TState>
                     var requestWorkers = Enumerable.Range(0, effectiveRequestWorkerCount).Select(_ => RequestWorkerAsync(requestScheduler, downloadScheduler, persistScheduler, runRuntime)).ToArray();
                     var downloadWorkers = Enumerable.Range(0, _options.DownloadWorkerCount).Select(_ => DownloadWorkerAsync(downloadScheduler, requestScheduler, persistScheduler, runRuntime)).ToArray();
                     var snapshotTask = PublishSnapshotsLoopAsync(runRuntime, requestScheduler, downloadScheduler);
-                    var rootRuntime = await RegisterNodeAsync(rootNode, rootState, null, runRuntime, cookieAccessor, requestScheduler, persistScheduler, false).ConfigureAwait(false);
+                    var rootRuntime = await RegisterNodeAsync(rootNode, rootState, null, runRuntime, cookieAccessor, requestScheduler, persistScheduler).ConfigureAwait(false);
                     _rootRuntime = rootRuntime ?? throw new InvalidOperationException("Root runtime registration failed unexpectedly.");
 
                     try
@@ -301,7 +301,6 @@ public sealed class LumaEngine<TState>
     /// <param name="cookieAccessor">Cookie 访问器。</param>
     /// <param name="requestScheduler">普通请求调度器。</param>
     /// <param name="persistScheduler">持久化调度器。</param>
-    /// <param name="prioritizeRequests">是否优先入队普通请求。</param>
     /// <returns>异步任务。</returns>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "引擎需隔离节点异常，保证主流程可持续。")]
     private async Task<LumaNodeRuntime<TState>?> RegisterNodeAsync(
@@ -311,8 +310,7 @@ public sealed class LumaEngine<TState>
         LumaRunRuntime runRuntime,
         ICookieAccessor cookieAccessor,
         NodeTaskScheduler requestScheduler,
-        PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler,
-        bool prioritizeRequests)
+        PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler)
     {
         var parentPath = parentRuntime?.Path;
         var path = string.IsNullOrWhiteSpace(parentPath) ? node.Key : $"{parentPath}/{node.Key}";
@@ -335,7 +333,7 @@ public sealed class LumaEngine<TState>
         try
         {
             runtime.State.SetStatus(NodeExecutionStatus.Running);
-            await BuildNodeRequestsAsync(runtime, requestScheduler, runtime.Context.CancellationToken, prioritizeRequests).ConfigureAwait(false);
+            await BuildNodeRequestsAsync(runtime, requestScheduler, runtime.Context.CancellationToken).ConfigureAwait(false);
             await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistScheduler, null).ConfigureAwait(false);
         }
         catch (LumaStopException stopException)
@@ -371,14 +369,13 @@ public sealed class LumaEngine<TState>
     /// <param name="runtime">节点运行时。</param>
     /// <param name="requestScheduler">普通请求调度器。</param>
     /// <param name="cancellationToken">取消令牌。</param>
-    /// <param name="prioritizeRequests">是否优先入队。</param>
     /// <returns>异步任务。</returns>
-    private async Task BuildNodeRequestsAsync(LumaNodeRuntime<TState> runtime, NodeTaskScheduler requestScheduler, CancellationToken cancellationToken, bool prioritizeRequests)
+    private async Task BuildNodeRequestsAsync(LumaNodeRuntime<TState> runtime, NodeTaskScheduler requestScheduler, CancellationToken cancellationToken)
     {
         await foreach (var request in runtime.Node.BuildRequestsAsync(runtime.Context).WithCancellation(cancellationToken).ConfigureAwait(false))
         {
             var normalizedRequest = NormalizeRequest(request, runtime.Path);
-            await requestScheduler.EnqueueAsync(normalizedRequest, prioritizeRequests, cancellationToken).ConfigureAwait(false);
+            await requestScheduler.EnqueueAsync(normalizedRequest, cancellationToken).ConfigureAwait(false);
             runtime.State.IncrementQueued();
             SignalStateChanged(runtime);
         }
@@ -418,15 +415,12 @@ public sealed class LumaEngine<TState>
                     continue;
                 }
 
-                var enteredExecutionSlot = false;
                 runtime.State.IncrementActive();
                 Interlocked.Increment(ref _activeNetworkCount);
                 SignalStateChanged(runtime);
 
                 try
                 {
-                    await runtime.WaitRequestExecutionSlotAsync(runtime.Context.CancellationToken).ConfigureAwait(false);
-                    enteredExecutionSlot = true;
                     var requestFlowController = await ResolveNodeTypeRequestFlowControllerAsync(runtime).ConfigureAwait(false);
                     if (requestFlowController is not null)
                     {
@@ -460,8 +454,7 @@ public sealed class LumaEngine<TState>
                             await foreach (var downloadRequest in runtime.Node.BuildDownloadRequestsAsync(response, runtime.Context).WithCancellation(runtime.Context.CancellationToken).ConfigureAwait(false))
                             {
                                 var normalizedDownloadRequest = NormalizeRequest(downloadRequest, runtime.Path);
-                                var prioritizeDownloads = runtime.Node.ExecutionOptions.ChildTraversalPolicy == ChildTraversalPolicy.Depth;
-                                await downloadScheduler.EnqueueAsync(normalizedDownloadRequest, prioritizeDownloads, runRuntime.Token).ConfigureAwait(false);
+                                await downloadScheduler.EnqueueAsync(normalizedDownloadRequest, runRuntime.Token).ConfigureAwait(false);
                                 runtime.State.IncrementQueued();
                                 SignalStateChanged(runtime);
                             }
@@ -496,11 +489,6 @@ public sealed class LumaEngine<TState>
                 }
                 finally
                 {
-                    if (enteredExecutionSlot)
-                    {
-                        runtime.ReleaseRequestExecutionSlot();
-                    }
-
                     runtime.State.DecrementActive();
                     Interlocked.Decrement(ref _activeNetworkCount);
                     SignalStateChanged(runtime);
@@ -547,15 +535,12 @@ public sealed class LumaEngine<TState>
                     continue;
                 }
 
-                var enteredExecutionSlot = false;
                 runtime.State.IncrementActive();
                 Interlocked.Increment(ref _activeNetworkCount);
                 SignalStateChanged(runtime);
 
                 try
                 {
-                    await runtime.WaitRequestExecutionSlotAsync(runtime.Context.CancellationToken).ConfigureAwait(false);
-                    enteredExecutionSlot = true;
                     var requestFlowController = await ResolveNodeTypeRequestFlowControllerAsync(runtime).ConfigureAwait(false);
                     if (requestFlowController is not null)
                     {
@@ -586,11 +571,6 @@ public sealed class LumaEngine<TState>
                 }
                 finally
                 {
-                    if (enteredExecutionSlot)
-                    {
-                        runtime.ReleaseRequestExecutionSlot();
-                    }
-
                     runtime.State.DecrementActive();
                     Interlocked.Decrement(ref _activeNetworkCount);
                     SignalStateChanged(runtime);
@@ -616,11 +596,10 @@ public sealed class LumaEngine<TState>
         LumaRequest? sourceRequest)
     {
         var dispatchBatch = runtime.Node.DrainDispatchBatch();
-        var prioritizeOutputs = runtime.Node.ExecutionOptions.ChildTraversalPolicy == ChildTraversalPolicy.Depth;
         if (dispatchBatch.HasWork)
         {
             WriteUnifiedLog(LogLevelKind.Debug, "Scheduler",
-                $"Event=DispatchBatchPrepared NodePath={runtime.Path} TraversalPolicy={runtime.Node.ExecutionOptions.ChildTraversalPolicy} PrioritizeOutputs={prioritizeOutputs} RequestCount={dispatchBatch.Requests.Count} ItemCount={dispatchBatch.Items.Count} ChildCount={dispatchBatch.Children.Count}");
+                $"Event=DispatchBatchPrepared NodePath={runtime.Path} ChildMaxConcurrency={runtime.Node.ExecutionOptions.ChildMaxConcurrency} RequestCount={dispatchBatch.Requests.Count} ItemCount={dispatchBatch.Items.Count} ChildCount={dispatchBatch.Children.Count}");
         }
 
         if (dispatchBatch.StopNode)
@@ -636,7 +615,7 @@ public sealed class LumaEngine<TState>
             foreach (var request in dispatchBatch.Requests)
             {
                 var normalizedRequest = NormalizeRequest(request, runtime.Path);
-                await requestScheduler.EnqueueAsync(normalizedRequest, prioritizeOutputs, runRuntime.Token).ConfigureAwait(false);
+                await requestScheduler.EnqueueAsync(normalizedRequest, runRuntime.Token).ConfigureAwait(false);
                 runtime.State.IncrementQueued();
                 SignalStateChanged(runtime);
             }
@@ -644,7 +623,7 @@ public sealed class LumaEngine<TState>
 
         foreach (var item in dispatchBatch.Items)
         {
-            await persistScheduler.EnqueueAsync(new ItemEnvelope<TState>(item, runtime.Context, sourceRequest), prioritizeOutputs, runRuntime.Token).ConfigureAwait(false);
+            await persistScheduler.EnqueueAsync(new ItemEnvelope<TState>(item, runtime.Context, sourceRequest), runRuntime.Token).ConfigureAwait(false);
         }
 
         if (!shouldBlockExpansion && dispatchBatch.Children.Count > 0)
@@ -665,15 +644,13 @@ public sealed class LumaEngine<TState>
     private async Task RegisterChildrenAsync(IReadOnlyList<NodeChildBinding<TState>> children, LumaNodeRuntime<TState> parentRuntime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler,
         PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler)
     {
-        var traversalPolicy = parentRuntime.Node.ExecutionOptions.ChildTraversalPolicy;
-        var prioritizeRequests = traversalPolicy == ChildTraversalPolicy.Depth;
         var tasks = new List<Task>(children.Count);
 
         foreach (var childBinding in children)
         {
             await parentRuntime.WaitChildSlotAsync(parentRuntime.Context.CancellationToken).ConfigureAwait(false);
             parentRuntime.IncrementRegisteringChild();
-            tasks.Add(RegisterChildInternalAsync(childBinding, parentRuntime, runRuntime, requestScheduler, persistScheduler, prioritizeRequests));
+            tasks.Add(RegisterChildInternalAsync(childBinding, parentRuntime, runRuntime, requestScheduler, persistScheduler));
         }
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -690,16 +667,15 @@ public sealed class LumaEngine<TState>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <param name="requestScheduler">普通请求调度器。</param>
     /// <param name="persistScheduler">持久化调度器。</param>
-    /// <param name="prioritizeRequests">是否优先入队。</param>
     /// <returns>异步任务。</returns>
     private async Task RegisterChildInternalAsync(NodeChildBinding<TState> childBinding, LumaNodeRuntime<TState> parentRuntime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler,
-        PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler, bool prioritizeRequests)
+        PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler)
     {
         try
         {
             var childState = childBinding.StateMapper(parentRuntime.Context.State);
             var cookieAccessor = new NetCookieAccessor(_netClient, ResolveRouteKind);
-            var childRuntime = await RegisterNodeAsync(childBinding.Node, childState, parentRuntime, runRuntime, cookieAccessor, requestScheduler, persistScheduler, prioritizeRequests).ConfigureAwait(false);
+            var childRuntime = await RegisterNodeAsync(childBinding.Node, childState, parentRuntime, runRuntime, cookieAccessor, requestScheduler, persistScheduler).ConfigureAwait(false);
             if (childRuntime is null)
             {
                 parentRuntime.ReleaseChildSlot();
@@ -1348,17 +1324,7 @@ public sealed class LumaEngine<TState>
     {
         ArgumentNullException.ThrowIfNull(rootNode);
         var configuredWorkerCount = Math.Max(1, _options.RequestWorkerCount);
-        if (rootNode.ExecutionOptions.ChildTraversalPolicy != ChildTraversalPolicy.Depth)
-        {
-            return configuredWorkerCount;
-        }
-
-        if (configuredWorkerCount > 1)
-        {
-            WriteUnifiedLog(LogLevelKind.Warning, "Engine", $"Event=RequestWorkerCountForcedToDepthConfigured Configured={configuredWorkerCount} Effective=1");
-        }
-
-        return 1;
+        return configuredWorkerCount;
     }
 
     /// <summary>
@@ -1370,17 +1336,7 @@ public sealed class LumaEngine<TState>
     {
         ArgumentNullException.ThrowIfNull(rootNode);
         var configuredWorkerCount = Math.Max(1, _options.PersistWorkerCount);
-        if (rootNode.ExecutionOptions.ChildTraversalPolicy != ChildTraversalPolicy.Depth)
-        {
-            return configuredWorkerCount;
-        }
-
-        if (configuredWorkerCount > 1)
-        {
-            WriteUnifiedLog(LogLevelKind.Warning, "Engine", $"Event=PersistWorkerCountForcedToDepthConfigured Configured={configuredWorkerCount} Effective=1");
-        }
-
-        return 1;
+        return configuredWorkerCount;
     }
 
     /// <summary>

@@ -40,7 +40,6 @@ Zeayii.Luma is a Node-driven crawling runtime framework for private provider int
 - `OnPersistedAsync`
 3. `NodeDispatchBatch`: stage output container (`Requests` / `Children` / `Items` / stop signal).
 4. `NodeExecutionOptions`:
-- `ChildTraversalPolicy`
 - `ChildMaxConcurrency`
 5. `LumaContext<TState>`: runtime metadata + resource capability functions (for example HTML parsing and Cookie operations).
 6. `NodeExecutionOptions` also includes `DefaultRouteKind` for default node route behavior.

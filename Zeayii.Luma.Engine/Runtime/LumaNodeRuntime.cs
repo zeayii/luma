@@ -18,14 +18,6 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     private readonly SemaphoreSlim _childConcurrencyGate;
 
     /// <summary>
-    ///     节点请求执行闸门。
-    ///     <para>
-    ///         仅在 Depth 节点启用，用于保证该节点请求/下载处理阶段串行执行。
-    ///     </para>
-    /// </summary>
-    private readonly SemaphoreSlim? _requestExecutionGate;
-
-    /// <summary>
     ///     子树完成通知源。
     /// </summary>
     private readonly TaskCompletionSource _subtreeCompletionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -103,10 +95,6 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
             CancellationTokenSource.Token);
         State = new LumaNodeState();
         _childConcurrencyGate = new SemaphoreSlim(Node.ExecutionOptions.ResolveChildMaxConcurrency());
-        if (Node.ExecutionOptions.ChildTraversalPolicy == ChildTraversalPolicy.Depth)
-        {
-            _requestExecutionGate = new SemaphoreSlim(1, 1);
-        }
     }
 
     /// <summary>
@@ -171,7 +159,6 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
         }
 
         _childConcurrencyGate.Dispose();
-        _requestExecutionGate?.Dispose();
         CancellationTokenSource.Dispose();
         return ValueTask.CompletedTask;
     }
@@ -240,29 +227,6 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     public void DecrementPendingChildSubtree()
     {
         Interlocked.Decrement(ref _pendingChildSubtreeCount);
-    }
-
-    /// <summary>
-    ///     进入节点请求执行闸门。
-    /// </summary>
-    /// <param name="cancellationToken">取消令牌。</param>
-    /// <returns>异步任务。</returns>
-    public Task WaitRequestExecutionSlotAsync(CancellationToken cancellationToken)
-    {
-        if (_requestExecutionGate is null)
-        {
-            return Task.CompletedTask;
-        }
-
-        return _requestExecutionGate.WaitAsync(cancellationToken);
-    }
-
-    /// <summary>
-    ///     释放节点请求执行闸门。
-    /// </summary>
-    public void ReleaseRequestExecutionSlot()
-    {
-        _requestExecutionGate?.Release();
     }
 
     /// <summary>

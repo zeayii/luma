@@ -41,8 +41,8 @@ sequenceDiagram
 
 ## Scheduling Semantics
 
-1. Nodes declare child traversal policy (`Breadth`/`Depth`).
-2. Nodes declare child expansion concurrency limits.
+1. Nodes declare child expansion concurrency limits.
+2. Engine expands children with structured concurrency semantics.
 3. Engine enforces global concurrency and queue backpressure.
 
 ## Consumer Guidance

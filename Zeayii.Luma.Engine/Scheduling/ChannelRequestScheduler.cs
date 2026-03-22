@@ -5,7 +5,7 @@ namespace Zeayii.Luma.Engine.Scheduling;
 /// <summary>
 ///     <b>节点任务调度器</b>
 ///     <para>
-///         提供支持队首/队尾插入的请求调度能力，用于实现节点级广度/深度扩展偏好。
+///         提供 FIFO 请求调度能力。
 ///     </para>
 /// </summary>
 /// <param name="capacity">队列容量上限。</param>
@@ -28,14 +28,9 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
     private readonly int _consumerCount = Math.Max(1, consumerCount);
 
     /// <summary>
-    ///     普通请求队列（Breadth 策略）。
+    ///     普通请求队列。
     /// </summary>
     private readonly LinkedList<LumaRequest> _normalQueue = [];
-
-    /// <summary>
-    ///     优先请求队列（Depth 策略，按栈语义消费）。
-    /// </summary>
-    private readonly LinkedList<LumaRequest> _priorityQueue = [];
 
     /// <summary>
     ///     队列互斥锁。
@@ -70,10 +65,9 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
     ///     请求入队。
     /// </summary>
     /// <param name="request">请求对象。</param>
-    /// <param name="prioritize">是否优先插入队首。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>异步任务。</returns>
-    public async ValueTask EnqueueAsync(LumaRequest request, bool prioritize, CancellationToken cancellationToken)
+    public async ValueTask EnqueueAsync(LumaRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -93,14 +87,7 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
 
             lock (_syncRoot)
             {
-                if (prioritize)
-                {
-                    _priorityQueue.AddLast(request);
-                }
-                else
-                {
-                    _normalQueue.AddLast(request);
-                }
+                _normalQueue.AddLast(request);
 
                 Interlocked.Increment(ref _count);
             }
@@ -134,12 +121,7 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
             lock (_syncRoot)
             {
                 LinkedListNode<LumaRequest>? node = null;
-                if (_priorityQueue.Last is not null)
-                {
-                    node = _priorityQueue.Last;
-                    _priorityQueue.RemoveLast();
-                }
-                else if (_normalQueue.First is not null)
+                if (_normalQueue.First is not null)
                 {
                     node = _normalQueue.First;
                     _normalQueue.RemoveFirst();

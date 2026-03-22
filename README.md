@@ -40,7 +40,6 @@ Zeayii.Luma 是一个面向站点抓取场景的 Node 驱动运行时框架。
 - `OnPersistedAsync`
 3. `NodeDispatchBatch`：节点阶段产出批次（`Requests` / `Children` / `Items` / 停止信号）。
 4. `NodeExecutionOptions`：
-- `ChildTraversalPolicy`
 - `ChildMaxConcurrency`
 5. `LumaContext<TState>`：运行元信息 + 资源能力函数（如 HTML 解析、Cookie 读写）。
 6. `NodeExecutionOptions` 还包含 `DefaultRouteKind`，用于节点默认请求/会话路由。

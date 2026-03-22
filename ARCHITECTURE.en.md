@@ -51,7 +51,6 @@
 - `StopNode` / `StopReason`
 
 2. `NodeExecutionOptions`
-- `ChildTraversalPolicy`: `Breadth` / `Depth`
 - `ChildMaxConcurrency`
 
 3. `LumaContext<TState>`
@@ -91,7 +90,7 @@ sequenceDiagram
 
 1. Global concurrency is controlled by Engine.
 2. Child expansion concurrency is declared per node via `ChildMaxConcurrency`.
-3. Child traversal order is declared per node via `ChildTraversalPolicy`.
+3. Child expansion concurrency is declared per node via `ChildMaxConcurrency`.
 4. Queue backpressure is enforced by the scheduler.
 
 ## 7. Design Constraints

@@ -52,17 +52,17 @@ public sealed class LumaEngineCriticalTests
     }
 
     /// <summary>
-    ///     验证广度策略会先处理先注册子节点的请求。
+    ///     验证结构化并发配置下会先处理先注册子节点的请求。
     /// </summary>
     [Fact]
-    public async Task RunAsyncShouldEnqueueByBreadthStrategyForChildren()
+    public async Task RunAsyncShouldEnqueueByChildRegistrationOrderForChildren()
     {
         var childA = new MultiRequestNode("A", "https://example.com/a/1", "https://example.com/a/2");
         var childB = new MultiRequestNode("B", "https://example.com/b/1");
-        var root = new RootWithChildrenNode("root", NodeExecutionOptions.Breadth(), childA, childB);
+        var root = new RootWithChildrenNode("root", new NodeExecutionOptions(LumaRouteKind.Auto, 1), childA, childB);
         var fixture = CreateFixture();
 
-        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-breadth", CancellationToken.None).ConfigureAwait(true);
+        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-child-order", CancellationToken.None).ConfigureAwait(true);
 
         Assert.Equal("https://example.com/a/1", fixture.NetClient.RequestedUrls[0]);
         Assert.Equal(3, fixture.NetClient.RequestedUrls.Count);
@@ -71,17 +71,17 @@ public sealed class LumaEngineCriticalTests
     }
 
     /// <summary>
-    ///     验证深度策略会优先处理后注册子节点（LIFO）。
+    ///     验证结构化并发配置下子节点请求可全部完成。
     /// </summary>
     [Fact]
-    public async Task RunAsyncShouldEnqueueByDepthStrategyForChildren()
+    public async Task RunAsyncShouldCompleteRequestsForAllChildren()
     {
         var childA = new MultiRequestNode("A", "https://example.com/a/1", "https://example.com/a/2");
         var childB = new MultiRequestNode("B", "https://example.com/b/1");
-        var root = new RootWithChildrenNode("root", NodeExecutionOptions.Depth(), childA, childB);
+        var root = new RootWithChildrenNode("root", new NodeExecutionOptions(LumaRouteKind.Auto, 1), childA, childB);
         var fixture = CreateFixture();
 
-        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-depth", CancellationToken.None).ConfigureAwait(true);
+        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-children", CancellationToken.None).ConfigureAwait(true);
 
         Assert.Equal(3, fixture.NetClient.RequestedUrls.Count);
         Assert.Equal(
@@ -110,18 +110,18 @@ public sealed class LumaEngineCriticalTests
     }
 
     /// <summary>
-    ///     验证深度策略下会先完成当前子树持久化，再推进后续兄弟节点。
+    ///     验证结构化并发配置下会先完成当前子树持久化，再推进后续兄弟节点。
     /// </summary>
     [Fact]
-    public async Task RunAsyncShouldPersistDepthSubtreeBeforeNextSibling()
+    public async Task RunAsyncShouldPersistSubtreeBeforeNextSibling()
     {
         var aLeaf = new SnapshotTreeNode("A1", "A1");
-        var aNode = new SnapshotTreeNode("A", "A", NodeExecutionOptions.Depth(), aLeaf);
+        var aNode = new SnapshotTreeNode("A", "A", new NodeExecutionOptions(LumaRouteKind.Auto, 1), aLeaf);
         var bNode = new SnapshotTreeNode("B", "B");
-        var root = new SnapshotTreeNode("root", "Root", NodeExecutionOptions.Depth(), aNode, bNode);
+        var root = new SnapshotTreeNode("root", "Root", new NodeExecutionOptions(LumaRouteKind.Auto, 1), aNode, bNode);
         var fixture = CreateFixture();
 
-        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-depth-persist-order", CancellationToken.None).ConfigureAwait(true);
+        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-subtree-persist-order", CancellationToken.None).ConfigureAwait(true);
 
         var persistedIds = fixture.ItemSink.StoredBatches
             .SelectMany(static batch => batch)
@@ -403,7 +403,7 @@ public sealed class LumaEngineCriticalTests
         {
             _itemId = itemId;
             _children = children;
-            _executionOptions = executionOptions ?? NodeExecutionOptions.Breadth();
+            _executionOptions = executionOptions ?? new NodeExecutionOptions(LumaRouteKind.Auto, 1);
         }
 
         /// <inheritdoc />
@@ -448,7 +448,7 @@ public sealed class LumaEngineCriticalTests
         public string CookieValue { get; private set; } = string.Empty;
 
         /// <inheritdoc />
-        public override NodeExecutionOptions ExecutionOptions => NodeExecutionOptions.Breadth(LumaRouteKind.Proxy);
+        public override NodeExecutionOptions ExecutionOptions => new NodeExecutionOptions(LumaRouteKind.Proxy, 1);
 
         /// <inheritdoc />
         public override async IAsyncEnumerable<LumaRequest> BuildRequestsAsync(LumaContext<TestState> context)
