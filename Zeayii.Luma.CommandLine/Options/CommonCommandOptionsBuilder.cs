@@ -34,7 +34,7 @@ internal static class CommonCommandOptionsBuilder
             LogFileSizeMegabytesOption = CreateOption("--log-file-size-mb", "单日志文件大小上限（MB）。", 20),
             NetLogLevelOption = CreateOption("--net-log-level", "网络模块日志等级。", NetLogLevel.Info),
             MaxLogEntriesOption = CreateOption("--max-log-entries", "窗口日志最大行数。", 1000),
-            RefreshIntervalMillisecondsOption = CreateOption("--refresh-interval-ms", "窗口刷新间隔（毫秒）。", 150),
+            RefreshIntervalMillisecondsOption = CreateOption("--refresh-interval-ms", "窗口刷新间隔（毫秒）。", 250),
             DownloadWorkerCountOption = CreateOption("--download-workers", "下载工作协程数量。", 4),
             PersistWorkerCountOption = CreateOption("--persist-workers", "持久化工作协程数量。", 2),
             RequestChannelCapacityOption = CreateOption("--request-channel-capacity", "请求通道容量。", 512),
