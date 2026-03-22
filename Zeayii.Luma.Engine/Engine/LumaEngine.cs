@@ -109,6 +109,21 @@ public sealed class LumaEngine<TState>
     private const int ChildSlotWaitDiagnosticThresholdMilliseconds = 2000;
 
     /// <summary>
+    ///     子节点槽位慢等待日志节流窗口（毫秒）。
+    /// </summary>
+    private const int ChildSlotWaitLogThrottleMilliseconds = 15000;
+
+    /// <summary>
+    ///     子节点槽位严重慢等待阈值（毫秒）。
+    /// </summary>
+    private const int ChildSlotWaitCriticalMilliseconds = 60000;
+
+    /// <summary>
+    ///     持久化批次常规摘要采样步长。
+    /// </summary>
+    private const int PersistBatchSummarySampleEvery = 100;
+
+    /// <summary>
     ///     当前活跃网络任务数量。
     /// </summary>
     private long _activeNetworkCount;
@@ -127,6 +142,16 @@ public sealed class LumaEngine<TState>
     ///     最近一次运行等待态日志时间戳（Unix 毫秒）。
     /// </summary>
     private long _lastRunWaitingLogTimestampMs;
+
+    /// <summary>
+    ///     子节点慢等待最近输出时间戳（按父节点路径）。
+    /// </summary>
+    private readonly ConcurrentDictionary<string, long> _childSlotWaitLastLogTimestampByParentPath = new(StringComparer.Ordinal);
+
+    /// <summary>
+    ///     持久化批次摘要序列号。
+    /// </summary>
+    private long _persistBatchSummarySequence;
 
     /// <summary>
     ///     根节点运行时。
@@ -291,6 +316,8 @@ public sealed class LumaEngine<TState>
         Interlocked.Exchange(ref _storedItemCount, 0);
         Interlocked.Exchange(ref _initializingNodeCount, 0);
         Interlocked.Exchange(ref _lastRunWaitingLogTimestampMs, 0);
+        Interlocked.Exchange(ref _persistBatchSummarySequence, 0);
+        _childSlotWaitLastLogTimestampByParentPath.Clear();
         while (_stateSignalChannel.Reader.TryRead(out _))
         {
             // do nothing
@@ -697,10 +724,7 @@ public sealed class LumaEngine<TState>
                     waitStopwatch.Stop();
                     if (waitStopwatch.ElapsedMilliseconds >= ChildSlotWaitDiagnosticThresholdMilliseconds)
                     {
-                        WriteUnifiedLog(
-                            LogLevelKind.Warning,
-                            "Scheduler",
-                            $"Event=ChildSlotWaitSlow ParentNodePath={parentRuntime.Path} ChildIndex={childIndex} WaitMs={waitStopwatch.ElapsedMilliseconds} ParentRegisteringChildCount={parentRuntime.RegisteringChildCount} ParentPendingChildRegistrationCount={parentRuntime.PendingChildRegistrationCount} ParentPendingChildSubtreeCount={parentRuntime.PendingChildSubtreeCount} RequestQueueCount={requestScheduler.Count} ActiveNetworkCount={Interlocked.Read(ref _activeNetworkCount)}");
+                        TryWriteChildSlotWaitSlowLog(parentRuntime, requestScheduler, childIndex, waitStopwatch.ElapsedMilliseconds);
                     }
 
                     parentRuntime.IncrementRegisteringChild();
@@ -1352,10 +1376,59 @@ public sealed class LumaEngine<TState>
             return;
         }
 
+        var sequence = Interlocked.Increment(ref _persistBatchSummarySequence);
+        var hasFailures = failedCount > 0;
+        var hasSkips = skippedCount > 0;
+        var shouldWriteInfoSample = sequence <= 5 || sequence % PersistBatchSummarySampleEvery == 0;
+
+        if (!hasFailures && !hasSkips && !shouldWriteInfoSample)
+        {
+            return;
+        }
+
+        var level = hasFailures ? LogLevelKind.Warning : LogLevelKind.Information;
         WriteUnifiedLog(
-            LogLevelKind.Information,
+            level,
             "Persist",
-            $"Event=PersistBatchSummary BufferedCount={bufferedCount} PersistedInputCount={persistedCount} StoredCount={storedCount} ExistsCount={existsCount} FailedCount={failedCount} SkippedCount={skippedCount}");
+            $"Event=PersistBatchSummary Seq={sequence} BufferedCount={bufferedCount} PersistedInputCount={persistedCount} StoredCount={storedCount} ExistsCount={existsCount} FailedCount={failedCount} SkippedCount={skippedCount}");
+    }
+
+    /// <summary>
+    ///     尝试输出子节点槽位慢等待日志（按父节点节流）。
+    /// </summary>
+    /// <param name="parentRuntime">父节点运行时。</param>
+    /// <param name="requestScheduler">请求调度器。</param>
+    /// <param name="childIndex">子节点序号。</param>
+    /// <param name="waitMilliseconds">等待毫秒数。</param>
+    private void TryWriteChildSlotWaitSlowLog(LumaNodeRuntime<TState> parentRuntime, NodeTaskScheduler requestScheduler, int childIndex, long waitMilliseconds)
+    {
+        ArgumentNullException.ThrowIfNull(parentRuntime);
+        ArgumentNullException.ThrowIfNull(requestScheduler);
+
+        var isCritical = waitMilliseconds >= ChildSlotWaitCriticalMilliseconds;
+        var nowMilliseconds = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
+        if (!isCritical)
+        {
+            var previousMilliseconds = _childSlotWaitLastLogTimestampByParentPath.GetOrAdd(parentRuntime.Path, static _ => 0);
+            if (nowMilliseconds - previousMilliseconds < ChildSlotWaitLogThrottleMilliseconds)
+            {
+                return;
+            }
+
+            if (!_childSlotWaitLastLogTimestampByParentPath.TryUpdate(parentRuntime.Path, nowMilliseconds, previousMilliseconds))
+            {
+                return;
+            }
+        }
+        else
+        {
+            _childSlotWaitLastLogTimestampByParentPath[parentRuntime.Path] = nowMilliseconds;
+        }
+
+        WriteUnifiedLog(
+            isCritical ? LogLevelKind.Warning : LogLevelKind.Information,
+            "Scheduler",
+            $"Event=ChildSlotWaitSlow ParentNodePath={parentRuntime.Path} ChildIndex={childIndex} WaitMs={waitMilliseconds} ParentRegisteringChildCount={parentRuntime.RegisteringChildCount} ParentPendingChildRegistrationCount={parentRuntime.PendingChildRegistrationCount} ParentPendingChildSubtreeCount={parentRuntime.PendingChildSubtreeCount} RequestQueueCount={requestScheduler.Count} ActiveNetworkCount={Interlocked.Read(ref _activeNetworkCount)}");
     }
 
     /// <summary>
