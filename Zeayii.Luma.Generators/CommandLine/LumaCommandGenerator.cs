@@ -25,7 +25,10 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
     /// <param name="compilation">编译上下文。</param>
     private static void Emit(SourceProductionContext sourceProductionContext, Compilation compilation)
     {
-        if (!IsEnabled(compilation)) return;
+        if (!IsEnabled(compilation))
+        {
+            return;
+        }
 
         var modules = CollectModules(compilation);
         sourceProductionContext.AddSource("Zeayii.Luma.CommandLine.Generated.LumaCommands.g.cs", GenerateSource(modules));
@@ -49,7 +52,10 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
     private static List<ModuleMetadata> CollectModules(Compilation compilation)
     {
         var moduleInterfaceSymbol = compilation.GetTypeByMetadataName("Zeayii.Luma.Abstractions.CommandLine.ILumaCommandModule");
-        if (moduleInterfaceSymbol is null) return [];
+        if (moduleInterfaceSymbol is null)
+        {
+            return [];
+        }
 
         var result = new List<ModuleMetadata>();
         var dedupe = new HashSet<string>(StringComparer.Ordinal);
@@ -59,7 +65,10 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
         };
         assemblies.AddRange(compilation.SourceModule.ReferencedAssemblySymbols);
 
-        foreach (var assembly in assemblies) CollectFromNamespace(assembly.GlobalNamespace, moduleInterfaceSymbol, result, dedupe);
+        foreach (var assembly in assemblies)
+        {
+            CollectFromNamespace(assembly.GlobalNamespace, moduleInterfaceSymbol, result, dedupe);
+        }
 
         result.Sort(static (left, right) => string.Compare(left.TypeDisplay, right.TypeDisplay, StringComparison.Ordinal));
         return result;
@@ -74,9 +83,15 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
     /// <param name="dedupe">去重集合。</param>
     private static void CollectFromNamespace(INamespaceSymbol namespaceSymbol, INamedTypeSymbol moduleInterfaceSymbol, List<ModuleMetadata> result, HashSet<string> dedupe)
     {
-        foreach (var typeMember in namespaceSymbol.GetTypeMembers()) CollectFromType(typeMember, moduleInterfaceSymbol, result, dedupe);
+        foreach (var typeMember in namespaceSymbol.GetTypeMembers())
+        {
+            CollectFromType(typeMember, moduleInterfaceSymbol, result, dedupe);
+        }
 
-        foreach (var childNamespace in namespaceSymbol.GetNamespaceMembers()) CollectFromNamespace(childNamespace, moduleInterfaceSymbol, result, dedupe);
+        foreach (var childNamespace in namespaceSymbol.GetNamespaceMembers())
+        {
+            CollectFromNamespace(childNamespace, moduleInterfaceSymbol, result, dedupe);
+        }
     }
 
     /// <summary>
@@ -95,10 +110,16 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
         if (typeSymbol.TypeKind == TypeKind.Class && typeSymbol.IsAbstract is false && typeSymbol.DeclaredAccessibility == Accessibility.Public && Implements(typeSymbol, moduleInterfaceSymbol))
         {
             var fullyQualifiedTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            if (dedupe.Add(fullyQualifiedTypeName)) result.Add(new ModuleMetadata(fullyQualifiedTypeName, BuildFactoryName(typeSymbol)));
+            if (dedupe.Add(fullyQualifiedTypeName))
+            {
+                result.Add(new ModuleMetadata(fullyQualifiedTypeName, BuildFactoryName(typeSymbol)));
+            }
         }
 
-        foreach (var nestedType in typeSymbol.GetTypeMembers()) CollectFromType(nestedType, moduleInterfaceSymbol, result, dedupe);
+        foreach (var nestedType in typeSymbol.GetTypeMembers())
+        {
+            CollectFromType(nestedType, moduleInterfaceSymbol, result, dedupe);
+        }
     }
 
     /// <summary>
@@ -120,10 +141,16 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
     private static string BuildFactoryName(INamedTypeSymbol typeSymbol)
     {
         var value = typeSymbol.Name;
-        if (string.IsNullOrWhiteSpace(value)) return "Unknown";
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "Unknown";
+        }
 
         var builder = new StringBuilder(value.Length);
-        foreach (var character in value.Where(char.IsLetterOrDigit)) builder.Append(character);
+        foreach (var character in value.Where(char.IsLetterOrDigit))
+        {
+            builder.Append(character);
+        }
 
         return builder.Length == 0 ? "Unknown" : builder.ToString();
     }
@@ -159,7 +186,10 @@ public sealed class LumaCommandGenerator : IIncrementalGenerator
         builder.AppendLine("    {");
         builder.AppendLine("        global::System.ArgumentNullException.ThrowIfNull(rootCommand);");
 
-        foreach (var module in modules) builder.Append("        rootCommand.Add(Create").Append(module.FactoryName).AppendLine("Command());");
+        foreach (var module in modules)
+        {
+            builder.Append("        rootCommand.Add(Create").Append(module.FactoryName).AppendLine("Command());");
+        }
 
         builder.AppendLine("    }");
 

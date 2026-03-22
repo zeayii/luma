@@ -77,20 +77,30 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (Volatile.Read(ref _completed) != 0) throw new InvalidOperationException("Scheduler is completed.");
+        if (Volatile.Read(ref _completed) != 0)
+        {
+            throw new InvalidOperationException("Scheduler is completed.");
+        }
 
         await _availableSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (Volatile.Read(ref _completed) != 0) throw new InvalidOperationException("Scheduler is completed.");
+            if (Volatile.Read(ref _completed) != 0)
+            {
+                throw new InvalidOperationException("Scheduler is completed.");
+            }
 
             lock (_syncRoot)
             {
                 if (prioritize)
+                {
                     _priorityQueue.AddLast(request);
+                }
                 else
+                {
                     _normalQueue.AddLast(request);
+                }
 
                 Interlocked.Increment(ref _count);
             }
@@ -115,7 +125,10 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0) return null;
+            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0)
+            {
+                return null;
+            }
 
             await _availableItems.WaitAsync(cancellationToken).ConfigureAwait(false);
             lock (_syncRoot)
@@ -140,7 +153,10 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
                 }
             }
 
-            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0) return null;
+            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0)
+            {
+                return null;
+            }
         }
     }
 
@@ -149,7 +165,10 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
     /// </summary>
     public void Complete()
     {
-        if (Interlocked.Exchange(ref _completed, 1) != 0) return;
+        if (Interlocked.Exchange(ref _completed, 1) != 0)
+        {
+            return;
+        }
 
         _availableItems.Release(_consumerCount);
     }

@@ -109,7 +109,10 @@ internal sealed class RollingFileLogSink : IDisposable
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "释放阶段需要吞掉后台收尾异常，保证进程退出路径稳定。")]
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
 
         _channel.Writer.TryComplete();
         _stopCancellationTokenSource.Cancel();
@@ -133,7 +136,10 @@ internal sealed class RollingFileLogSink : IDisposable
     public void WriteLine(string line)
     {
         ArgumentNullException.ThrowIfNull(line);
-        if (Volatile.Read(ref _disposed) != 0) return;
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
 
         _channel.Writer.TryWrite(line);
     }
@@ -186,7 +192,10 @@ internal sealed class RollingFileLogSink : IDisposable
         }
 
         var estimatedBytes = GetEstimatedBytes(nextLine);
-        if (SafeLength(_activeFilePath) + estimatedBytes > _maxFileBytes) SwitchWriter(_activeDate, _activeIndex + 1);
+        if (SafeLength(_activeFilePath) + estimatedBytes > _maxFileBytes)
+        {
+            SwitchWriter(_activeDate, _activeIndex + 1);
+        }
     }
 
     /// <summary>
@@ -232,29 +241,53 @@ internal sealed class RollingFileLogSink : IDisposable
     private void CleanupPolicyFiles()
     {
         var files = _logDirectory.GetFiles("crawler-*.log", SearchOption.TopDirectoryOnly).OrderBy(static file => file.Name, StringComparer.Ordinal).ToList();
-        if (files.Count <= 0) return;
+        if (files.Count <= 0)
+        {
+            return;
+        }
 
         var cutoffDate = DateOnly.FromDateTime(DateTime.Now.AddDays(-_retentionDays));
         foreach (var file in files.ToList())
         {
-            if (!TryParseDateFromFileName(file.Name, out var date)) continue;
+            if (!TryParseDateFromFileName(file.Name, out var date))
+            {
+                continue;
+            }
 
-            if (date >= cutoffDate || PathEquals(file.FullName, _activeFilePath)) continue;
+            if (date >= cutoffDate || PathEquals(file.FullName, _activeFilePath))
+            {
+                continue;
+            }
 
-            if (TryDelete(file)) files.Remove(file);
+            if (TryDelete(file))
+            {
+                files.Remove(file);
+            }
         }
 
         var totalBytes = files.Sum(static file => SafeLength(file.FullName));
-        if (totalBytes <= _maxTotalBytes) return;
+        if (totalBytes <= _maxTotalBytes)
+        {
+            return;
+        }
 
         foreach (var file in files)
         {
-            if (totalBytes <= _maxTotalBytes) break;
+            if (totalBytes <= _maxTotalBytes)
+            {
+                break;
+            }
 
-            if (PathEquals(file.FullName, _activeFilePath)) continue;
+            if (PathEquals(file.FullName, _activeFilePath))
+            {
+                continue;
+            }
 
             var bytes = SafeLength(file.FullName);
-            if (TryDelete(file)) totalBytes -= bytes;
+            if (TryDelete(file))
+            {
+                totalBytes -= bytes;
+            }
         }
     }
 
@@ -267,7 +300,10 @@ internal sealed class RollingFileLogSink : IDisposable
     private static bool TryParseDateFromFileName(string fileName, out DateOnly date)
     {
         date = DateOnly.MinValue;
-        if (!fileName.StartsWith("crawler-", StringComparison.OrdinalIgnoreCase) || !fileName.EndsWith(".log", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!fileName.StartsWith("crawler-", StringComparison.OrdinalIgnoreCase) || !fileName.EndsWith(".log", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
 
         var raw = fileName["crawler-".Length..^".log".Length];
         var separatorIndex = raw.IndexOf('.');

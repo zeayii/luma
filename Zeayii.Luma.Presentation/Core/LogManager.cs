@@ -91,7 +91,10 @@ public sealed class LogManager : ILogManager, IDisposable
     /// <inheritdoc />
     public void DrainPendingEntries(int maxBatch = 4096)
     {
-        if (maxBatch <= 0) return;
+        if (maxBatch <= 0)
+        {
+            return;
+        }
 
         var processed = 0;
         while (processed < maxBatch && _pendingEntries.Reader.TryRead(out var entry))
@@ -106,7 +109,10 @@ public sealed class LogManager : ILogManager, IDisposable
     /// <inheritdoc />
     public void Write(LogLevelKind level, string tag, string message, Exception? exception = null)
     {
-        if (!IsEnabled(level)) return;
+        if (!IsEnabled(level))
+        {
+            return;
+        }
 
         var entry = new PendingLogEntry(DateTimeOffset.UtcNow, level, tag, message, exception?.ToString() ?? string.Empty);
 
@@ -123,7 +129,10 @@ public sealed class LogManager : ILogManager, IDisposable
     public LogSnapshot CreateSnapshot()
     {
         DrainPendingEntries();
-        if (_lastSnapshot is not null && _lastSnapshotTailSequence == _lastConsumedSequence) return _lastSnapshot;
+        if (_lastSnapshot is not null && _lastSnapshotTailSequence == _lastConsumedSequence)
+        {
+            return _lastSnapshot;
+        }
 
         _lastSnapshotTailSequence = _lastConsumedSequence;
         _lastSnapshot = new LogSnapshot

@@ -127,7 +127,10 @@ internal static class OptionsBuilder
     /// <returns>最终默认路由类型。</returns>
     private static LumaRouteKind ResolveDefaultRouteKind(ApplicationOptions applicationOptions)
     {
-        if (applicationOptions.DefaultRouteKind != LumaRouteKind.Auto) return applicationOptions.DefaultRouteKind;
+        if (applicationOptions.DefaultRouteKind != LumaRouteKind.Auto)
+        {
+            return applicationOptions.DefaultRouteKind;
+        }
 
         var hasProxy = applicationOptions.Proxies.Count > 0;
         return hasProxy ? LumaRouteKind.Proxy : LumaRouteKind.Direct;

@@ -57,7 +57,10 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     /// <inheritdoc />
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        if (_isStarted) throw new InvalidOperationException("PresentationManager already started.");
+        if (_isStarted)
+        {
+            throw new InvalidOperationException("PresentationManager already started.");
+        }
 
         _isStarted = true;
         var localCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -71,6 +74,7 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
             if (Console.IsOutputRedirected || Console.IsErrorRedirected)
             {
                 while (!lifecycleToken.IsCancellationRequested)
+                {
                     try
                     {
                         logManager.DrainPendingEntries();
@@ -80,6 +84,7 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
                     {
                         break;
                     }
+                }
 
                 return;
             }
@@ -91,7 +96,10 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
                     while (!lifecycleToken.IsCancellationRequested)
                     {
                         PollKeyboardInput();
-                        if (Volatile.Read(ref _stopRequested) != 0) await StopAsync().ConfigureAwait(false);
+                        if (Volatile.Read(ref _stopRequested) != 0)
+                        {
+                            await StopAsync().ConfigureAwait(false);
+                        }
 
                         context.UpdateTarget(Render());
 
@@ -111,6 +119,7 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
             catch (IOException)
             {
                 while (!lifecycleToken.IsCancellationRequested)
+                {
                     try
                     {
                         logManager.DrainPendingEntries();
@@ -120,6 +129,7 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
                     {
                         break;
                     }
+                }
             }
         }
         finally
@@ -132,7 +142,10 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     /// <inheritdoc />
     public async ValueTask StopAsync()
     {
-        if (_lifecycleCancellationTokenSource is not null) await _lifecycleCancellationTokenSource.CancelAsync().ConfigureAwait(false);
+        if (_lifecycleCancellationTokenSource is not null)
+        {
+            await _lifecycleCancellationTokenSource.CancelAsync().ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -187,7 +200,10 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     /// <returns>可见文本集合。</returns>
     private string[] SelectNodes(IReadOnlyList<NodeSnapshot> nodes)
     {
-        if (nodes.Count == 0) return ["[grey]No nodes[/]"];
+        if (nodes.Count == 0)
+        {
+            return ["[grey]No nodes[/]"];
+        }
 
         var visibleLineCount = ResolveBodyVisibleLineCount();
         var maxOffset = Math.Max(0, nodes.Count - visibleLineCount);
@@ -212,7 +228,10 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     /// <returns>可见文本集合。</returns>
     private string[] SelectLogs(IReadOnlyList<LogEntry> logEntries)
     {
-        if (logEntries.Count == 0) return ["[grey]No logs[/]"];
+        if (logEntries.Count == 0)
+        {
+            return ["[grey]No logs[/]"];
+        }
 
         var visibleLineCount = ResolveBodyVisibleLineCount();
         var maxOffset = Math.Max(0, logEntries.Count - visibleLineCount);
@@ -251,25 +270,25 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
                 switch (key.Key)
                 {
                     case ConsoleKey.UpArrow:
-                    {
-                        _logOffset++;
-                        break;
-                    }
+                        {
+                            _logOffset++;
+                            break;
+                        }
                     case ConsoleKey.DownArrow:
-                    {
-                        _logOffset = Math.Max(0, _logOffset - 1);
-                        break;
-                    }
+                        {
+                            _logOffset = Math.Max(0, _logOffset - 1);
+                            break;
+                        }
                     case ConsoleKey.PageUp:
-                    {
-                        _logOffset += 10;
-                        break;
-                    }
+                        {
+                            _logOffset += 10;
+                            break;
+                        }
                     case ConsoleKey.PageDown:
-                    {
-                        _logOffset = Math.Max(0, _logOffset - 10);
-                        break;
-                    }
+                        {
+                            _logOffset = Math.Max(0, _logOffset - 10);
+                            break;
+                        }
                 }
 
                 continue;
@@ -278,30 +297,30 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
-                {
-                    _nodeOffset++;
-                    break;
-                }
+                    {
+                        _nodeOffset++;
+                        break;
+                    }
                 case ConsoleKey.DownArrow:
-                {
-                    _nodeOffset = Math.Max(0, _nodeOffset - 1);
-                    break;
-                }
+                    {
+                        _nodeOffset = Math.Max(0, _nodeOffset - 1);
+                        break;
+                    }
                 case ConsoleKey.PageUp:
-                {
-                    _nodeOffset += 10;
-                    break;
-                }
+                    {
+                        _nodeOffset += 10;
+                        break;
+                    }
                 case ConsoleKey.PageDown:
-                {
-                    _nodeOffset = Math.Max(0, _nodeOffset - 10);
-                    break;
-                }
+                    {
+                        _nodeOffset = Math.Max(0, _nodeOffset - 10);
+                        break;
+                    }
                 case ConsoleKey.Q:
-                {
-                    Interlocked.Exchange(ref _stopRequested, 1);
-                    break;
-                }
+                    {
+                        Interlocked.Exchange(ref _stopRequested, 1);
+                        break;
+                    }
             }
         }
     }

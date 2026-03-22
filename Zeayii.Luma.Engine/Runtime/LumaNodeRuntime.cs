@@ -103,7 +103,10 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
             CancellationTokenSource.Token);
         State = new LumaNodeState();
         _childConcurrencyGate = new SemaphoreSlim(Node.ExecutionOptions.ResolveChildMaxConcurrency());
-        if (Node.ExecutionOptions.ChildTraversalPolicy == ChildTraversalPolicy.Depth) _requestExecutionGate = new SemaphoreSlim(1, 1);
+        if (Node.ExecutionOptions.ChildTraversalPolicy == ChildTraversalPolicy.Depth)
+        {
+            _requestExecutionGate = new SemaphoreSlim(1, 1);
+        }
     }
 
     /// <summary>
@@ -162,7 +165,10 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     /// <returns>异步任务。</returns>
     public ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return ValueTask.CompletedTask;
+        }
 
         _childConcurrencyGate.Dispose();
         _requestExecutionGate?.Dispose();
@@ -243,7 +249,10 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     /// <returns>异步任务。</returns>
     public Task WaitRequestExecutionSlotAsync(CancellationToken cancellationToken)
     {
-        if (_requestExecutionGate is null) return Task.CompletedTask;
+        if (_requestExecutionGate is null)
+        {
+            return Task.CompletedTask;
+        }
 
         return _requestExecutionGate.WaitAsync(cancellationToken);
     }
@@ -263,7 +272,10 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     public void Cancel(string reason)
     {
         State.SetStatus(NodeExecutionStatus.Stopping, reason);
-        if (!CancellationTokenSource.IsCancellationRequested) CancellationTokenSource.Cancel();
+        if (!CancellationTokenSource.IsCancellationRequested)
+        {
+            CancellationTokenSource.Cancel();
+        }
     }
 
     /// <summary>
@@ -272,7 +284,10 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     /// <returns>本次调用是否完成子树。</returns>
     public bool TryCompleteSubtree()
     {
-        if (Volatile.Read(ref _subtreeCompleted) != 0) return false;
+        if (Volatile.Read(ref _subtreeCompleted) != 0)
+        {
+            return false;
+        }
 
         if (State.ActiveRequestCount > 0 ||
             State.QueuedRequestCount > 0 ||
@@ -280,11 +295,19 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
             InitializingCount > 0 ||
             PendingChildSubtreeCount > 0 ||
             State.Status == NodeExecutionStatus.Pending)
+        {
             return false;
+        }
 
-        if (Interlocked.CompareExchange(ref _subtreeCompleted, 1, 0) != 0) return false;
+        if (Interlocked.CompareExchange(ref _subtreeCompleted, 1, 0) != 0)
+        {
+            return false;
+        }
 
-        if (State.Status is NodeExecutionStatus.Running or NodeExecutionStatus.Stopping) State.SetStatus(CancellationTokenSource.IsCancellationRequested ? NodeExecutionStatus.Cancelled : NodeExecutionStatus.Completed, State.Reason);
+        if (State.Status is NodeExecutionStatus.Running or NodeExecutionStatus.Stopping)
+        {
+            State.SetStatus(CancellationTokenSource.IsCancellationRequested ? NodeExecutionStatus.Cancelled : NodeExecutionStatus.Completed, State.Reason);
+        }
 
         _subtreeCompletionSource.TrySetResult();
         return true;

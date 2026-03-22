@@ -322,7 +322,10 @@ public sealed class LumaEngineCriticalTests
         public RootWithChildrenNode(string key, NodeExecutionOptions executionOptions, params LumaNode<TestState>[] children) : base(key)
         {
             _executionOptions = executionOptions;
-            foreach (var child in children) AddChild(child);
+            foreach (var child in children)
+            {
+                AddChild(child);
+            }
         }
 
         /// <inheritdoc />
@@ -359,7 +362,10 @@ public sealed class LumaEngineCriticalTests
         {
             context.CancellationToken.ThrowIfCancellationRequested();
             await Task.CompletedTask.ConfigureAwait(false);
-            foreach (var requestUrl in _urls) yield return new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(requestUrl)), context.NodePath);
+            foreach (var requestUrl in _urls)
+            {
+                yield return new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(requestUrl)), context.NodePath);
+            }
         }
 
         /// <inheritdoc />
@@ -408,7 +414,10 @@ public sealed class LumaEngineCriticalTests
         {
             context.CancellationToken.ThrowIfCancellationRequested();
             AddItem(new TestItem(_itemId));
-            foreach (var child in _children) AddChild(child);
+            foreach (var child in _children)
+            {
+                AddChild(child);
+            }
 
             await Task.CompletedTask.ConfigureAwait(false);
             yield break;

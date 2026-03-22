@@ -557,7 +557,11 @@ public sealed class LumaEngine<TState>
                     await runtime.WaitRequestExecutionSlotAsync(runtime.Context.CancellationToken).ConfigureAwait(false);
                     enteredExecutionSlot = true;
                     var requestFlowController = await ResolveNodeTypeRequestFlowControllerAsync(runtime).ConfigureAwait(false);
-                    if (requestFlowController is not null) await requestFlowController.WaitTurnAsync(runtime.Context.CancellationToken).ConfigureAwait(false);
+                    if (requestFlowController is not null)
+                    {
+                        await requestFlowController.WaitTurnAsync(runtime.Context.CancellationToken).ConfigureAwait(false);
+                    }
+
                     using var response = await SendAsync(request, runtime.Context, runtime.Context.CancellationToken).ConfigureAwait(false);
                     requestFlowController?.ObserveResponse(response.StatusCode);
                     await runtime.Node.HandleDownloadResponseAsync(response, request, runtime.Context).ConfigureAwait(false);
@@ -628,6 +632,7 @@ public sealed class LumaEngine<TState>
         var shouldBlockExpansion = dispatchBatch.StopNode || runtime.CancellationTokenSource.IsCancellationRequested;
 
         if (!shouldBlockExpansion)
+        {
             foreach (var request in dispatchBatch.Requests)
             {
                 var normalizedRequest = NormalizeRequest(request, runtime.Path);
@@ -635,6 +640,7 @@ public sealed class LumaEngine<TState>
                 runtime.State.IncrementQueued();
                 SignalStateChanged(runtime);
             }
+        }
 
         foreach (var item in dispatchBatch.Items)
         {
@@ -998,7 +1004,11 @@ public sealed class LumaEngine<TState>
             throw new InvalidOperationException("Persist batch result count must match filtered input count.");
         }
 
-        for (var resultIndex = 0; resultIndex < persistedIndexes.Count; resultIndex++) resolvedResults[persistedIndexes[resultIndex]] = batchPersistResults[resultIndex];
+        for (var resultIndex = 0; resultIndex < persistedIndexes.Count; resultIndex++)
+        {
+            resolvedResults[persistedIndexes[resultIndex]] = batchPersistResults[resultIndex];
+        }
+
         WriteUnifiedLog(LogLevelKind.Debug, "Persist", $"Event=PersistBatchResolved BufferedCount={buffer.Count} PersistedCount={filteredEnvelopes.Count} ResultCount={batchPersistResults.Count}");
 
         for (var index = 0; index < buffer.Count; index++)
@@ -1295,33 +1305,37 @@ public sealed class LumaEngine<TState>
         switch (action)
         {
             case NodeExceptionAction.KeepRunning:
-            {
-                return true;
-            }
+                {
+                    return true;
+                }
             case NodeExceptionAction.StopNode:
-            {
-                runtime.Cancel(reason);
-                runtime.State.SetStatus(NodeExecutionStatus.Failed, reason);
-                SignalStateChanged(runtime);
-                return true;
-            }
+                {
+                    runtime.Cancel(reason);
+                    runtime.State.SetStatus(NodeExecutionStatus.Failed, reason);
+                    SignalStateChanged(runtime);
+                    return true;
+                }
             case NodeExceptionAction.StopRun:
-            {
-                runtime.State.SetStatus(NodeExecutionStatus.Failed, reason);
-                runRuntime.SetStatus("Stopped");
-                if (!runRuntime.CancellationTokenSource.IsCancellationRequested) await runRuntime.CancellationTokenSource.CancelAsync().ConfigureAwait(false);
-                SignalStateChanged(runtime);
+                {
+                    runtime.State.SetStatus(NodeExecutionStatus.Failed, reason);
+                    runRuntime.SetStatus("Stopped");
+                    if (!runRuntime.CancellationTokenSource.IsCancellationRequested)
+                    {
+                        await runRuntime.CancellationTokenSource.CancelAsync().ConfigureAwait(false);
+                    }
 
-                return true;
-            }
+                    SignalStateChanged(runtime);
+
+                    return true;
+                }
             case NodeExceptionAction.Rethrow:
-            {
-                return false;
-            }
+                {
+                    return false;
+                }
             default:
-            {
-                throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown node exception action.");
-            }
+                {
+                    throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown node exception action.");
+                }
         }
     }
 
@@ -1383,29 +1397,33 @@ public sealed class LumaEngine<TState>
         switch (exception.Scope)
         {
             case LumaStopScope.Node:
-            {
-                runtime.Cancel(reason);
-                SignalStateChanged(runtime);
-                WriteUnifiedLog(LogLevelKind.Warning, "Engine", $"Event=StopExceptionNodeHandled Phase={phase} NodePath={runtime.Path} Scope={exception.Scope} Reason={reason}");
-                LumaEngineLogMessages.NodeScopedStopLog(_logger, runtime.Path, exception.Code, reason, null);
-                return;
-            }
+                {
+                    runtime.Cancel(reason);
+                    SignalStateChanged(runtime);
+                    WriteUnifiedLog(LogLevelKind.Warning, "Engine", $"Event=StopExceptionNodeHandled Phase={phase} NodePath={runtime.Path} Scope={exception.Scope} Reason={reason}");
+                    LumaEngineLogMessages.NodeScopedStopLog(_logger, runtime.Path, exception.Code, reason, null);
+                    return;
+                }
             case LumaStopScope.Run:
             case LumaStopScope.App:
-            {
-                runtime.State.SetStatus(NodeExecutionStatus.Cancelled, reason);
-                runRuntime.SetStatus("Stopped");
-                if (!runRuntime.CancellationTokenSource.IsCancellationRequested) await runRuntime.CancellationTokenSource.CancelAsync().ConfigureAwait(false);
-                SignalStateChanged(runtime);
+                {
+                    runtime.State.SetStatus(NodeExecutionStatus.Cancelled, reason);
+                    runRuntime.SetStatus("Stopped");
+                    if (!runRuntime.CancellationTokenSource.IsCancellationRequested)
+                    {
+                        await runRuntime.CancellationTokenSource.CancelAsync().ConfigureAwait(false);
+                    }
 
-                WriteUnifiedLog(LogLevelKind.Error, "Engine", $"Event=StopExceptionRunStopped Phase={phase} NodePath={runtime.Path} Scope={exception.Scope} Reason={reason}");
-                LumaEngineLogMessages.RunScopedStopLog(_logger, runtime.Path, exception.Scope.ToString(), exception.Code, reason, null);
-                return;
-            }
+                    SignalStateChanged(runtime);
+
+                    WriteUnifiedLog(LogLevelKind.Error, "Engine", $"Event=StopExceptionRunStopped Phase={phase} NodePath={runtime.Path} Scope={exception.Scope} Reason={reason}");
+                    LumaEngineLogMessages.RunScopedStopLog(_logger, runtime.Path, exception.Scope.ToString(), exception.Code, reason, null);
+                    return;
+                }
             default:
-            {
-                throw new ArgumentOutOfRangeException(nameof(exception), exception.Scope, "Unknown stop scope.");
-            }
+                {
+                    throw new ArgumentOutOfRangeException(nameof(exception), exception.Scope, "Unknown stop scope.");
+                }
         }
     }
 
@@ -1614,7 +1632,10 @@ public sealed class LumaEngine<TState>
                     waitMilliseconds = checked((int)Math.Min(int.MaxValue, _nextAllowedUtcMilliseconds - nowUtcMilliseconds));
                 }
 
-                if (waitMilliseconds <= 0) continue;
+                if (waitMilliseconds <= 0)
+                {
+                    continue;
+                }
 
                 await Task.Delay(waitMilliseconds, cancellationToken).ConfigureAwait(false);
             }
@@ -1697,7 +1718,10 @@ public sealed class LumaEngine<TState>
             var uri = BuildUri(domain, path);
             await WithCookieContainerAsync(routeKind, container =>
             {
-                foreach (var cookie in container.GetCookies(uri).Cast<Cookie>()) container.Add(uri, new Cookie(cookie.Name, string.Empty, cookie.Path, cookie.Domain) { Expires = DateTime.UtcNow.AddYears(-1) });
+                foreach (var cookie in container.GetCookies(uri).Cast<Cookie>())
+                {
+                    container.Add(uri, new Cookie(cookie.Name, string.Empty, cookie.Path, cookie.Domain) { Expires = DateTime.UtcNow.AddYears(-1) });
+                }
             }, cancellationToken).ConfigureAwait(false);
         }
 

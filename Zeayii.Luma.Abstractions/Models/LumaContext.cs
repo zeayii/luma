@@ -163,7 +163,10 @@ public sealed class LumaContext<TState>
         foreach (var cookie in cookies)
         {
             var cookieCopy = CloneCookie(cookie);
-            if (string.IsNullOrWhiteSpace(cookieCopy.Domain)) continue;
+            if (string.IsNullOrWhiteSpace(cookieCopy.Domain))
+            {
+                continue;
+            }
 
             await _cookieAccessor.SetCookieAsync(DefaultRouteKind, cookieCopy, CancellationToken).ConfigureAwait(false);
         }
@@ -227,7 +230,10 @@ public sealed class LumaContext<TState>
         var cookies = await _cookieAccessor.GetCookiesAsync(DefaultRouteKind, uri.Host, uri.AbsolutePath, CancellationToken).ConfigureAwait(false);
         foreach (var cookie in cookies)
         {
-            if (!string.Equals(cookie.Name, name, StringComparison.Ordinal)) continue;
+            if (!string.Equals(cookie.Name, name, StringComparison.Ordinal))
+            {
+                continue;
+            }
 
             var expiredCookie = CloneCookie(cookie);
             expiredCookie.Value = string.Empty;
@@ -255,9 +261,15 @@ public sealed class LumaContext<TState>
     private static Cookie NormalizeCookieForUri(Cookie cookie, Uri uri)
     {
         var normalizedCookie = CloneCookie(cookie);
-        if (string.IsNullOrWhiteSpace(normalizedCookie.Domain)) normalizedCookie.Domain = uri.Host;
+        if (string.IsNullOrWhiteSpace(normalizedCookie.Domain))
+        {
+            normalizedCookie.Domain = uri.Host;
+        }
 
-        if (string.IsNullOrWhiteSpace(normalizedCookie.Path)) normalizedCookie.Path = "/";
+        if (string.IsNullOrWhiteSpace(normalizedCookie.Path))
+        {
+            normalizedCookie.Path = "/";
+        }
 
         return normalizedCookie;
     }

@@ -139,29 +139,29 @@ internal sealed class LumaNodeState
         switch (result.Decision)
         {
             case PersistDecision.Stored:
-            {
-                Interlocked.Increment(ref _storedCount);
-                Interlocked.Exchange(ref _consecutiveExistingCount, 0);
-                break;
-            }
+                {
+                    Interlocked.Increment(ref _storedCount);
+                    Interlocked.Exchange(ref _consecutiveExistingCount, 0);
+                    break;
+                }
             case PersistDecision.AlreadyExists:
-            {
-                Interlocked.Increment(ref _alreadyExistsCount);
-                Interlocked.Increment(ref _consecutiveExistingCount);
-                break;
-            }
+                {
+                    Interlocked.Increment(ref _alreadyExistsCount);
+                    Interlocked.Increment(ref _consecutiveExistingCount);
+                    break;
+                }
             case PersistDecision.Failed:
-            {
-                Interlocked.Increment(ref _failedCount);
-                Interlocked.Exchange(ref _consecutiveExistingCount, 0);
-                break;
-            }
+                {
+                    Interlocked.Increment(ref _failedCount);
+                    Interlocked.Exchange(ref _consecutiveExistingCount, 0);
+                    break;
+                }
             case PersistDecision.Skipped:
             default:
-            {
-                Interlocked.Exchange(ref _consecutiveExistingCount, 0);
-                break;
-            }
+                {
+                    Interlocked.Exchange(ref _consecutiveExistingCount, 0);
+                    break;
+                }
         }
     }
 }

@@ -58,10 +58,16 @@ internal sealed class LogRingBuffer
     /// <returns>日志数组。</returns>
     public IReadOnlyList<LogEntry> Snapshot()
     {
-        if (_count == 0) return [];
+        if (_count == 0)
+        {
+            return [];
+        }
 
         var result = new LogEntry[_count];
-        for (var index = 0; index < _count; index++) result[index] = _buffer[(_start + index) % _buffer.Length];
+        for (var index = 0; index < _count; index++)
+        {
+            result[index] = _buffer[(_start + index) % _buffer.Length];
+        }
 
         return result;
     }

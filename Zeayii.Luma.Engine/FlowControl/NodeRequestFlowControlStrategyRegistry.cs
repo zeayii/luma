@@ -47,9 +47,15 @@ public static class NodeRequestFlowControlStrategyRegistry
     /// <returns>策略实例。</returns>
     public static INodeRequestFlowControlStrategy ResolveOrDefault(string? strategyKey)
     {
-        if (!string.IsNullOrWhiteSpace(strategyKey) && Factories.TryGetValue(strategyKey.Trim(), out var factory)) return factory();
+        if (!string.IsNullOrWhiteSpace(strategyKey) && Factories.TryGetValue(strategyKey.Trim(), out var factory))
+        {
+            return factory();
+        }
 
-        if (Factories.TryGetValue(DefaultStrategyKey, out var defaultFactory)) return defaultFactory();
+        if (Factories.TryGetValue(DefaultStrategyKey, out var defaultFactory))
+        {
+            return defaultFactory();
+        }
 
         return new StableProbeNodeRequestFlowControlStrategy();
     }

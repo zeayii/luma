@@ -318,7 +318,10 @@ public sealed class LumaEngineResilienceTests
         public ParentNode(string key, NodeExecutionOptions executionOptions, params LumaNode<TestState>[] children) : base(key)
         {
             _executionOptions = executionOptions;
-            foreach (var child in children) AddChild(child);
+            foreach (var child in children)
+            {
+                AddChild(child);
+            }
         }
 
         /// <inheritdoc />
@@ -548,7 +551,10 @@ public sealed class LumaEngineResilienceTests
         {
             context.CancellationToken.ThrowIfCancellationRequested();
             await Task.CompletedTask.ConfigureAwait(false);
-            foreach (var requestUrl in _urls) yield return new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(requestUrl)), context.NodePath);
+            foreach (var requestUrl in _urls)
+            {
+                yield return new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(requestUrl)), context.NodePath);
+            }
         }
 
         /// <inheritdoc />
@@ -714,9 +720,15 @@ public sealed class LumaEngineResilienceTests
             while (true)
             {
                 var snapshot = Volatile.Read(ref _max);
-                if (current <= snapshot) return;
+                if (current <= snapshot)
+                {
+                    return;
+                }
 
-                if (Interlocked.CompareExchange(ref _max, current, snapshot) == snapshot) return;
+                if (Interlocked.CompareExchange(ref _max, current, snapshot) == snapshot)
+                {
+                    return;
+                }
             }
         }
 
@@ -922,7 +934,10 @@ public sealed class LumaEngineResilienceTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (delay > TimeSpan.Zero) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            if (delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            }
 
             onRequest();
             return new HttpResponseMessage(HttpStatusCode.OK)

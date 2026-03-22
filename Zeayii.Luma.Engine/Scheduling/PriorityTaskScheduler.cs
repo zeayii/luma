@@ -74,20 +74,30 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
     /// <returns>异步任务。</returns>
     public async ValueTask EnqueueAsync(TItem item, bool prioritize, CancellationToken cancellationToken)
     {
-        if (Volatile.Read(ref _completed) != 0) throw new InvalidOperationException("Scheduler is completed.");
+        if (Volatile.Read(ref _completed) != 0)
+        {
+            throw new InvalidOperationException("Scheduler is completed.");
+        }
 
         await _availableSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (Volatile.Read(ref _completed) != 0) throw new InvalidOperationException("Scheduler is completed.");
+            if (Volatile.Read(ref _completed) != 0)
+            {
+                throw new InvalidOperationException("Scheduler is completed.");
+            }
 
             lock (_syncRoot)
             {
                 if (prioritize)
+                {
                     _priorityQueue.AddLast(item);
+                }
                 else
+                {
                     _normalQueue.AddLast(item);
+                }
 
                 Interlocked.Increment(ref _count);
             }
@@ -111,7 +121,10 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0) return (false, default!);
+            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0)
+            {
+                return (false, default!);
+            }
 
             await _availableItems.WaitAsync(cancellationToken).ConfigureAwait(false);
             lock (_syncRoot)
@@ -136,7 +149,10 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
                 }
             }
 
-            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0) return (false, default!);
+            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0)
+            {
+                return (false, default!);
+            }
         }
     }
 
@@ -179,7 +195,10 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
     /// </summary>
     public void Complete()
     {
-        if (Interlocked.Exchange(ref _completed, 1) != 0) return;
+        if (Interlocked.Exchange(ref _completed, 1) != 0)
+        {
+            return;
+        }
 
         _availableItems.Release(_consumerCount);
     }

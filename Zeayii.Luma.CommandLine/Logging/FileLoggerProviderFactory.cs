@@ -20,7 +20,10 @@ internal static class FileLoggerProviderFactory
     {
         ArgumentNullException.ThrowIfNull(applicationOptions);
 
-        if (applicationOptions.FileLogLevel == LogLevel.None) return new FileLoggerProviderFactoryResult(new NullLoggerProvider(), null);
+        if (applicationOptions.FileLogLevel == LogLevel.None)
+        {
+            return new FileLoggerProviderFactoryResult(new NullLoggerProvider(), null);
+        }
 
         var configuredDirectory = applicationOptions.LogDirectory;
         try
@@ -32,6 +35,7 @@ internal static class FileLoggerProviderFactory
         {
             var fallbackDirectory = Path.Combine(Environment.CurrentDirectory, "logs");
             if (!string.Equals(Path.GetFullPath(configuredDirectory), Path.GetFullPath(fallbackDirectory), StringComparison.OrdinalIgnoreCase))
+            {
                 try
                 {
                     var fallbackProvider = CreateProvider(applicationOptions, fallbackDirectory);
@@ -44,6 +48,7 @@ internal static class FileLoggerProviderFactory
                         $"FileLoggingDisabled ConfiguredDirectory='{configuredDirectory}' FallbackDirectory='{fallbackDirectory}' PrimaryReason='{exception.Message}' FallbackReason='{fallbackException.Message}'";
                     return new FileLoggerProviderFactoryResult(new NullLoggerProvider(), warningMessage);
                 }
+            }
 
             var disabledWarningMessage = $"FileLoggingDisabled Directory='{configuredDirectory}' Reason='{exception.Message}'";
             return new FileLoggerProviderFactoryResult(new NullLoggerProvider(), disabledWarningMessage);

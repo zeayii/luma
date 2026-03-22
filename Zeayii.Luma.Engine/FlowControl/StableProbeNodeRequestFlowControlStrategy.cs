@@ -85,9 +85,15 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
         _adaptiveBackoffMaxHits = options.ResolveAdaptiveBackoffMaxHits();
         _adaptiveMaxIntervalMilliseconds = Math.Max(0, options.AdaptiveMaxIntervalMilliseconds);
 
-        if (_adaptiveMinIntervalMilliseconds < _configuredMinIntervalMilliseconds) _adaptiveMinIntervalMilliseconds = _configuredMinIntervalMilliseconds;
+        if (_adaptiveMinIntervalMilliseconds < _configuredMinIntervalMilliseconds)
+        {
+            _adaptiveMinIntervalMilliseconds = _configuredMinIntervalMilliseconds;
+        }
 
-        if (_adaptiveBackoffMaxHits > 0 && _adaptiveBackoffHitCount > _adaptiveBackoffMaxHits) _adaptiveBackoffHitCount = _adaptiveBackoffMaxHits;
+        if (_adaptiveBackoffMaxHits > 0 && _adaptiveBackoffHitCount > _adaptiveBackoffMaxHits)
+        {
+            _adaptiveBackoffHitCount = _adaptiveBackoffMaxHits;
+        }
     }
 
     /// <inheritdoc />
@@ -99,7 +105,10 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
     /// <inheritdoc />
     public void ObserveResponse(HttpStatusCode statusCode, long nowUtcMilliseconds)
     {
-        if (!_adaptiveBackoffEnabled || _adaptiveBackoffStatusCodes.Count == 0) return;
+        if (!_adaptiveBackoffEnabled || _adaptiveBackoffStatusCodes.Count == 0)
+        {
+            return;
+        }
 
         var statusCodeValue = (int)statusCode;
         if (_adaptiveBackoffStatusCodes.Contains(statusCodeValue))
@@ -108,7 +117,10 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
             return;
         }
 
-        if (statusCodeValue is >= 200 and < 400) ObserveSuccess(nowUtcMilliseconds);
+        if (statusCodeValue is >= 200 and < 400)
+        {
+            ObserveSuccess(nowUtcMilliseconds);
+        }
     }
 
     /// <summary>
@@ -147,21 +159,34 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
             return;
         }
 
-        if (nowUtcMilliseconds < _cooldownUntilUtcMilliseconds) return;
+        if (nowUtcMilliseconds < _cooldownUntilUtcMilliseconds)
+        {
+            return;
+        }
 
         _probeWindowSuccessCount += 1;
-        if (_probeWindowSuccessCount < _probeWindowSuccessThreshold) return;
+        if (_probeWindowSuccessCount < _probeWindowSuccessThreshold)
+        {
+            return;
+        }
 
         _probeWindowSuccessCount = 0;
         var diff = _adaptiveMinIntervalMilliseconds - _configuredMinIntervalMilliseconds;
         var reduce = Math.Max(1, diff / 8);
         _adaptiveMinIntervalMilliseconds = Math.Max(_configuredMinIntervalMilliseconds, _adaptiveMinIntervalMilliseconds - reduce);
-        if (_adaptiveBackoffHitCount > 0) _adaptiveBackoffHitCount -= 1;
+        if (_adaptiveBackoffHitCount > 0)
+        {
+            _adaptiveBackoffHitCount -= 1;
+        }
 
         if (_adaptiveMinIntervalMilliseconds <= _configuredMinIntervalMilliseconds)
+        {
             _probeWindowSuccessThreshold = MinProbeWindowSuccessCount;
+        }
         else
+        {
             _probeWindowSuccessThreshold = Math.Max(MinProbeWindowSuccessCount, _probeWindowSuccessThreshold / 2);
+        }
     }
 
     /// <summary>
@@ -170,7 +195,10 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
     /// <returns>退避上限。</returns>
     private int ResolveAdaptiveMaxIntervalMilliseconds()
     {
-        if (_adaptiveMaxIntervalMilliseconds > 0) return _adaptiveMaxIntervalMilliseconds;
+        if (_adaptiveMaxIntervalMilliseconds > 0)
+        {
+            return _adaptiveMaxIntervalMilliseconds;
+        }
 
         var configured = Math.Max(1, _configuredMinIntervalMilliseconds);
         return Math.Max(configured, 60_000);

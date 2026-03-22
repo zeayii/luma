@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Zeayii.Infrastructure.Net.Http.Configuration.Policies;
 using Zeayii.Infrastructure.Net.Http.Logging;
@@ -84,11 +85,13 @@ internal static class CommonCommandOptionsBuilder
                     return;
                 }
 
-                if (!Uri.TryCreate(value, UriKind.Absolute, out _))
+                if (Uri.TryCreate(value, UriKind.Absolute, out _))
                 {
-                    result.AddError($"Invalid proxy URI: {value}");
-                    return;
+                    continue;
                 }
+
+                result.AddError($"Invalid proxy URI: {value}");
+                return;
             }
         });
 
@@ -122,8 +125,13 @@ internal static class CommonCommandOptionsBuilder
         {
             var retryBaseDelayMilliseconds = result.GetValue(options.RetryBaseDelayMillisecondsOption);
             var retryMaxDelayMilliseconds = result.GetValue(options.RetryMaxDelayMillisecondsOption);
-            if (retryMaxDelayMilliseconds < retryBaseDelayMilliseconds) result.AddError("--retry-max-delay-ms must be greater than or equal to --retry-base-delay-ms.");
+            if (retryMaxDelayMilliseconds < retryBaseDelayMilliseconds)
+            {
+                result.AddError("--retry-max-delay-ms must be greater than or equal to --retry-base-delay-ms.");
+            }
         });
+
+        ApplyGeneratedShortAliases(options);
 
         Add(command, options.RunNameOption);
         Add(command, options.LogDirectoryOption);
@@ -274,7 +282,131 @@ internal static class CommonCommandOptionsBuilder
         option.Validators.Add(result =>
         {
             var value = result.GetValue(option);
-            if (value < minimum) result.AddError($"{alias} must be greater than or equal to {minimum}.");
+            if (value < minimum)
+            {
+                result.AddError($"{alias} must be greater than or equal to {minimum}.");
+            }
         });
+    }
+
+    /// <summary>
+    ///     为通用参数自动生成短别名。
+    ///     <para>
+    ///         规则为按长参数分段首字母生成，若发生冲突则扩展首段字符直到唯一。
+    ///     </para>
+    /// </summary>
+    /// <param name="options">参数集合。</param>
+    private static void ApplyGeneratedShortAliases(CommonCommandOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var optionSymbols = typeof(CommonCommandOptions)
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Where(static property => typeof(Option).IsAssignableFrom(property.PropertyType))
+            .Select(property => property.GetValue(options) as Option)
+            .Where(static option => option is not null)
+            .Cast<Option>()
+            .Select(option => (Option: option, LongAlias: ResolveLongAlias(option)))
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry.LongAlias))
+            .OrderBy(static entry => entry.LongAlias, StringComparer.Ordinal)
+            .ToArray();
+
+        var usedAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (option, _) in optionSymbols)
+        {
+            foreach (var alias in option.Aliases)
+            {
+                if (alias.StartsWith("-", StringComparison.Ordinal))
+                {
+                    usedAliases.Add(alias);
+                }
+            }
+        }
+
+        foreach (var (option, longAlias) in optionSymbols)
+        {
+            var shortAlias = BuildUniqueShortAlias(longAlias!, usedAliases);
+            if (string.IsNullOrWhiteSpace(shortAlias))
+            {
+                continue;
+            }
+
+            option.Aliases.Add(shortAlias);
+            usedAliases.Add(shortAlias);
+        }
+    }
+
+    /// <summary>
+    ///     解析参数主长别名。
+    /// </summary>
+    /// <param name="option">参数对象。</param>
+    /// <returns>主长别名。</returns>
+    private static string? ResolveLongAlias(Option option)
+    {
+        ArgumentNullException.ThrowIfNull(option);
+        return option.Aliases.FirstOrDefault(static alias => alias.StartsWith("--", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     构造唯一短别名。
+    /// </summary>
+    /// <param name="longAlias">长别名。</param>
+    /// <param name="usedAliases">已占用别名集合。</param>
+    /// <returns>短别名。</returns>
+    private static string BuildUniqueShortAlias(string longAlias, HashSet<string> usedAliases)
+    {
+        ArgumentNullException.ThrowIfNull(longAlias);
+        ArgumentNullException.ThrowIfNull(usedAliases);
+
+        var segments = longAlias.TrimStart('-').Split('-', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        for (var extensionLength = 0; extensionLength < segments[0].Length; extensionLength++)
+        {
+            var candidate = BuildShortAliasCandidate(segments, extensionLength);
+            if (string.IsNullOrWhiteSpace(candidate) || usedAliases.Contains(candidate))
+            {
+                continue;
+            }
+
+            return candidate;
+        }
+
+        var suffix = 2;
+        while (true)
+        {
+            var candidate = $"{BuildShortAliasCandidate(segments, segments[0].Length - 1)}{suffix}";
+            if (!usedAliases.Contains(candidate))
+            {
+                return candidate;
+            }
+
+            suffix++;
+        }
+    }
+
+    /// <summary>
+    ///     基于分段构造短别名候选值。
+    /// </summary>
+    /// <param name="segments">分段数组。</param>
+    /// <param name="extensionLength">首段扩展长度。</param>
+    /// <returns>短别名候选值。</returns>
+    private static string BuildShortAliasCandidate(string[] segments, int extensionLength)
+    {
+        ArgumentNullException.ThrowIfNull(segments);
+        var firstSegment = segments[0];
+        var firstSegmentTake = Math.Min(firstSegment.Length, extensionLength + 1);
+        var head = firstSegment[..firstSegmentTake];
+
+        if (segments.Length == 1)
+        {
+            return $"-{head}";
+        }
+
+        var tailInitials = string.Concat(segments.Skip(1).Select(static segment => segment[0]));
+        return $"-{head[0]}{head[1..]}{tailInitials}";
     }
 }

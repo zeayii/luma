@@ -73,7 +73,10 @@ internal sealed class LumaRunRuntime : IAsyncDisposable
     /// <returns>异步任务。</returns>
     public ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return ValueTask.CompletedTask;
+        }
 
         CancellationTokenSource.Dispose();
         return ValueTask.CompletedTask;

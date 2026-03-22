@@ -32,12 +32,18 @@ internal sealed class RollingFileLogger(string categoryName, LogLevel minimumLev
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
         ArgumentNullException.ThrowIfNull(formatter);
-        if (!IsEnabled(logLevel)) return;
+        if (!IsEnabled(logLevel))
+        {
+            return;
+        }
 
         var timestamp = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
         var message = formatter(state, exception);
         var line = $"{timestamp} [{logLevel}] [{_categoryName}] {message}";
-        if (exception is not null) line = $"{line}{Environment.NewLine}{exception}";
+        if (exception is not null)
+        {
+            line = $"{line}{Environment.NewLine}{exception}";
+        }
 
         sink.WriteLine(line);
     }

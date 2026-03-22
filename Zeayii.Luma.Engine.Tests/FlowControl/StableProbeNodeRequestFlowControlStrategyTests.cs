@@ -34,7 +34,10 @@ public sealed class StableProbeNodeRequestFlowControlStrategyTests
         strategy.ObserveResponse(HttpStatusCode.OK, 1_000);
         Assert.Equal(20, strategy.ResolveEffectiveMinIntervalMilliseconds());
 
-        for (var index = 0; index < 48; index++) strategy.ObserveResponse(HttpStatusCode.OK, 30_000 + index);
+        for (var index = 0; index < 48; index++)
+        {
+            strategy.ObserveResponse(HttpStatusCode.OK, 30_000 + index);
+        }
 
         var recoveredInterval = strategy.ResolveEffectiveMinIntervalMilliseconds();
         Assert.InRange(recoveredInterval, 10, 19);
@@ -83,10 +86,17 @@ public sealed class StableProbeNodeRequestFlowControlStrategyTests
         strategy.ObserveResponse(HttpStatusCode.TooManyRequests, 0);
         Assert.Equal(20, strategy.ResolveEffectiveMinIntervalMilliseconds());
 
-        for (var index = 0; index < 24; index++) strategy.ObserveResponse(HttpStatusCode.OK, 30_000 + index);
+        for (var index = 0; index < 24; index++)
+        {
+            strategy.ObserveResponse(HttpStatusCode.OK, 30_000 + index);
+        }
+
         Assert.Equal(20, strategy.ResolveEffectiveMinIntervalMilliseconds());
 
-        for (var index = 24; index < 48; index++) strategy.ObserveResponse(HttpStatusCode.OK, 30_000 + index);
+        for (var index = 24; index < 48; index++)
+        {
+            strategy.ObserveResponse(HttpStatusCode.OK, 30_000 + index);
+        }
 
         Assert.InRange(strategy.ResolveEffectiveMinIntervalMilliseconds(), 10, 19);
     }

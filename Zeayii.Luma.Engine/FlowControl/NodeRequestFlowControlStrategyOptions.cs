@@ -46,12 +46,19 @@ public readonly record struct NodeRequestFlowControlStrategyOptions(
     /// <returns>去重后的状态码集合。</returns>
     public HashSet<int> BuildAdaptiveBackoffStatusCodeSet()
     {
-        if (AdaptiveBackoffStatusCodes is null || AdaptiveBackoffStatusCodes.Count == 0) return [];
+        if (AdaptiveBackoffStatusCodes is null || AdaptiveBackoffStatusCodes.Count == 0)
+        {
+            return [];
+        }
 
         var set = new HashSet<int>();
         foreach (var statusCode in AdaptiveBackoffStatusCodes)
+        {
             if (statusCode is >= (int)HttpStatusCode.Continue and <= 599)
+            {
                 set.Add(statusCode);
+            }
+        }
 
         return set;
     }
