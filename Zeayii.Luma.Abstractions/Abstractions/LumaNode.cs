@@ -67,6 +67,22 @@ public abstract class LumaNode<TState>
     public virtual int ConsecutiveExistingStopThreshold => 0;
 
     /// <summary>
+    ///     解析节点请求流控配置。
+    ///     <para>
+    ///         该配置用于引擎构建“按节点类型共享”的请求节流器。
+    ///         默认返回 <see cref="NodeFlowControlOptions.Disabled" />，表示不启用额外节点级流控。
+    ///     </para>
+    /// </summary>
+    /// <param name="context">节点上下文。</param>
+    /// <returns>节点流控配置快照。</returns>
+    public virtual NodeFlowControlOptions ResolveFlowControlOptions(LumaContext<TState> context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        context.CancellationToken.ThrowIfCancellationRequested();
+        return NodeFlowControlOptions.Disabled;
+    }
+
+    /// <summary>
     ///     构建初始请求流。
     /// </summary>
     /// <param name="context">节点上下文。</param>
@@ -232,7 +248,7 @@ public abstract class LumaNode<TState>
         lock (_outputSyncRoot)
         {
             _stopRequested = true;
-            _stopReason = reason ?? string.Empty;
+            _stopReason = reason;
         }
     }
 

@@ -31,6 +31,34 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     private int _disposed;
 
     /// <summary>
+    ///     子节点注册中的数量。
+    /// </summary>
+    private long _registeringChildCount;
+
+    /// <summary>
+    ///     节点初始化中的数量。
+    ///     <para>
+    ///         用于覆盖 BuildRequests/首轮分发阶段，避免初始化期间被误判为“已排空”。
+    ///     </para>
+    /// </summary>
+    private long _initializingCount;
+
+    /// <summary>
+    ///     子树中待完成的直接子节点数量。
+    /// </summary>
+    private long _pendingChildSubtreeCount;
+
+    /// <summary>
+    ///     子树完成标记。
+    /// </summary>
+    private int _subtreeCompleted;
+
+    /// <summary>
+    ///     子树完成通知源。
+    /// </summary>
+    private readonly TaskCompletionSource _subtreeCompletionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
     ///     初始化节点运行时。
     /// </summary>
     /// <param name="node">抽象层节点。</param>
@@ -109,6 +137,26 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     public LumaNodeState State { get; }
 
     /// <summary>
+    ///     子树完成任务。
+    /// </summary>
+    public Task SubtreeCompletionTask => _subtreeCompletionSource.Task;
+
+    /// <summary>
+    ///     子节点注册中的数量。
+    /// </summary>
+    public long RegisteringChildCount => Interlocked.Read(ref _registeringChildCount);
+
+    /// <summary>
+    ///     节点初始化中的数量。
+    /// </summary>
+    public long InitializingCount => Interlocked.Read(ref _initializingCount);
+
+    /// <summary>
+    ///     子树中待完成的直接子节点数量。
+    /// </summary>
+    public long PendingChildSubtreeCount => Interlocked.Read(ref _pendingChildSubtreeCount);
+
+    /// <summary>
     ///     释放运行时资源。
     /// </summary>
     /// <returns>异步任务。</returns>
@@ -141,6 +189,54 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     }
 
     /// <summary>
+    ///     增加子节点注册中的数量。
+    /// </summary>
+    public void IncrementRegisteringChild()
+    {
+        Interlocked.Increment(ref _registeringChildCount);
+    }
+
+    /// <summary>
+    ///     减少子节点注册中的数量。
+    /// </summary>
+    public void DecrementRegisteringChild()
+    {
+        Interlocked.Decrement(ref _registeringChildCount);
+    }
+
+    /// <summary>
+    ///     增加节点初始化中的数量。
+    /// </summary>
+    public void IncrementInitializing()
+    {
+        Interlocked.Increment(ref _initializingCount);
+    }
+
+    /// <summary>
+    ///     减少节点初始化中的数量。
+    /// </summary>
+    public void DecrementInitializing()
+    {
+        Interlocked.Decrement(ref _initializingCount);
+    }
+
+    /// <summary>
+    ///     增加待完成子节点子树数量。
+    /// </summary>
+    public void IncrementPendingChildSubtree()
+    {
+        Interlocked.Increment(ref _pendingChildSubtreeCount);
+    }
+
+    /// <summary>
+    ///     减少待完成子节点子树数量。
+    /// </summary>
+    public void DecrementPendingChildSubtree()
+    {
+        Interlocked.Decrement(ref _pendingChildSubtreeCount);
+    }
+
+    /// <summary>
     ///     进入节点请求执行闸门。
     /// </summary>
     /// <param name="cancellationToken">取消令牌。</param>
@@ -168,5 +264,40 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     {
         State.SetStatus(NodeExecutionStatus.Stopping, reason);
         if (!CancellationTokenSource.IsCancellationRequested) CancellationTokenSource.Cancel();
+    }
+
+    /// <summary>
+    ///     尝试完成当前节点子树。
+    /// </summary>
+    /// <returns>本次调用是否完成子树。</returns>
+    public bool TryCompleteSubtree()
+    {
+        if (Volatile.Read(ref _subtreeCompleted) != 0)
+        {
+            return false;
+        }
+
+        if (State.ActiveRequestCount > 0 ||
+            State.QueuedRequestCount > 0 ||
+            RegisteringChildCount > 0 ||
+            InitializingCount > 0 ||
+            PendingChildSubtreeCount > 0 ||
+            State.Status == NodeExecutionStatus.Pending)
+        {
+            return false;
+        }
+
+        if (Interlocked.CompareExchange(ref _subtreeCompleted, 1, 0) != 0)
+        {
+            return false;
+        }
+
+        if (State.Status is NodeExecutionStatus.Running or NodeExecutionStatus.Stopping)
+        {
+            State.SetStatus(CancellationTokenSource.IsCancellationRequested ? NodeExecutionStatus.Cancelled : NodeExecutionStatus.Completed, State.Reason);
+        }
+
+        _subtreeCompletionSource.TrySetResult();
+        return true;
     }
 }

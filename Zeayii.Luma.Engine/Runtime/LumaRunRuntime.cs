@@ -21,13 +21,15 @@ internal sealed class LumaRunRuntime : IAsyncDisposable
     /// <param name="commandName">命令名称。</param>
     /// <param name="runName">运行名称。</param>
     /// <param name="parentToken">父级取消令牌。</param>
-    public LumaRunRuntime(string commandName, string runName, CancellationToken parentToken)
+    /// <param name="timeProvider">时间提供器。</param>
+    public LumaRunRuntime(string commandName, string runName, CancellationToken parentToken, TimeProvider timeProvider)
     {
+        ArgumentNullException.ThrowIfNull(timeProvider);
         CommandName = commandName;
-        RunName = string.IsNullOrWhiteSpace(runName) ? $"{CommandName}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}" : runName;
+        RunName = string.IsNullOrWhiteSpace(runName) ? $"{CommandName}-{timeProvider.GetUtcNow():yyyyMMdd-HHmmss}" : runName;
         RunId = Guid.NewGuid();
         CancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(parentToken);
-        StartedAtUtc = DateTimeOffset.UtcNow;
+        StartedAtUtc = timeProvider.GetUtcNow();
     }
 
     /// <summary>

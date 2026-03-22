@@ -159,6 +159,21 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
+    ///     验证父节点停止会级联取消子节点（父 -> 子单向传播）。
+    /// </summary>
+    [Fact]
+    public async Task RunAsyncShouldCascadeCancellationFromParentToChild()
+    {
+        var child = new CancellationAwareChildNode("child", TimeSpan.FromSeconds(10));
+        var root = new ParentStopsSelfNode("root", "https://example.com/parent-stop", child);
+        var fixture = CreateFixture(downloaderDelay: TimeSpan.FromMilliseconds(120));
+
+        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-parent-cancel-cascade", CancellationToken.None).ConfigureAwait(true);
+
+        Assert.True(child.CancellationObserved);
+    }
+
+    /// <summary>
     ///     创建测试夹具。
     /// </summary>
     private static EngineFixture CreateFixture(
@@ -417,6 +432,89 @@ public sealed class LumaEngineResilienceTests
             {
                 _probe.Exit();
             }
+        }
+
+        /// <inheritdoc />
+        public override ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    ///     父节点自停止测试节点。
+    /// </summary>
+    private sealed class ParentStopsSelfNode : LumaNode<TestState>
+    {
+        /// <summary>
+        ///     请求地址。
+        /// </summary>
+        private readonly string _url;
+
+        /// <summary>
+        ///     初始化节点。
+        /// </summary>
+        public ParentStopsSelfNode(string key, string url, LumaNode<TestState> child) : base(key)
+        {
+            _url = url;
+            AddChild(child);
+        }
+
+        /// <inheritdoc />
+        public override async IAsyncEnumerable<LumaRequest> BuildRequestsAsync(LumaContext<TestState> context)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            await Task.CompletedTask.ConfigureAwait(false);
+            yield return new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(_url)), context.NodePath);
+        }
+
+        /// <inheritdoc />
+        public override ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            StopNode("parent-stop");
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    ///     取消感知子节点。
+    /// </summary>
+    private sealed class CancellationAwareChildNode : LumaNode<TestState>
+    {
+        /// <summary>
+        ///     构建阶段延迟时长。
+        /// </summary>
+        private readonly TimeSpan _delay;
+
+        /// <summary>
+        ///     初始化节点。
+        /// </summary>
+        public CancellationAwareChildNode(string key, TimeSpan delay) : base(key)
+        {
+            _delay = delay;
+        }
+
+        /// <summary>
+        ///     是否观察到取消。
+        /// </summary>
+        public bool CancellationObserved { get; private set; }
+
+        /// <inheritdoc />
+        public override async IAsyncEnumerable<LumaRequest> BuildRequestsAsync(LumaContext<TestState> context)
+        {
+            try
+            {
+                await Task.Delay(_delay, context.CancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+            {
+                CancellationObserved = true;
+                throw;
+            }
+
+            yield break;
         }
 
         /// <inheritdoc />

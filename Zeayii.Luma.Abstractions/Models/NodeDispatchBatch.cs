@@ -35,4 +35,9 @@ public sealed class NodeDispatchBatch<TState>
     ///     节点停止原因。
     /// </summary>
     public required string StopReason { get; init; }
+
+    /// <summary>
+    ///     是否包含任一待处理输出。
+    /// </summary>
+    public bool HasWork => StopNode || Requests.Count > 0 || Children.Count > 0 || Items.Count > 0;
 }

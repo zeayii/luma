@@ -1,4 +1,5 @@
 using Zeayii.Luma.Abstractions.Models;
+using Zeayii.Luma.Engine.FlowControl;
 
 namespace Zeayii.Luma.Engine.Configuration;
 
@@ -59,4 +60,20 @@ public sealed class LumaEngineOptions
     ///     呈现刷新间隔。
     /// </summary>
     public required TimeSpan PresentationRefreshInterval { get; init; }
+
+    /// <summary>
+    ///     时间提供器。
+    ///     <para>
+    ///         用于统一引擎内时间读取，便于测试场景注入可控时间源。
+    ///     </para>
+    /// </summary>
+    public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+
+    /// <summary>
+    ///     节点流控策略解析器。
+    ///     <para>
+    ///         为空时使用框架默认解析逻辑。
+    ///     </para>
+    /// </summary>
+    public Func<string?, INodeRequestFlowControlStrategy>? NodeFlowControlStrategyResolver { get; init; }
 }
