@@ -13,7 +13,7 @@ using Zeayii.Luma.Engine.Engine;
 namespace Zeayii.Luma.Engine.Tests;
 
 /// <summary>
-///     <b>LumaEngine<TestState> 关键运行链路测试</b>
+///     <b>LumaEngine{TestState} 关键运行链路测试</b>
 /// </summary>
 public sealed class LumaEngineCriticalTests
 {
@@ -166,9 +166,7 @@ public sealed class LumaEngineCriticalTests
     /// <summary>
     ///     测试状态对象。
     /// </summary>
-    private sealed class TestState
-    {
-    }
+    private sealed class TestState;
 
     /// <summary>
     ///     引擎测试夹具。
@@ -378,6 +376,11 @@ public sealed class LumaEngineCriticalTests
     private sealed class SnapshotTreeNode : LumaNode<TestState>
     {
         /// <summary>
+        ///     子节点集合。
+        /// </summary>
+        private readonly IReadOnlyList<LumaNode<TestState>> _children;
+
+        /// <summary>
         ///     节点执行选项。
         /// </summary>
         private readonly NodeExecutionOptions _executionOptions;
@@ -386,11 +389,6 @@ public sealed class LumaEngineCriticalTests
         ///     节点数据项标识。
         /// </summary>
         private readonly string _itemId;
-
-        /// <summary>
-        ///     子节点集合。
-        /// </summary>
-        private readonly IReadOnlyList<LumaNode<TestState>> _children;
 
         /// <summary>
         ///     初始化节点。
@@ -410,10 +408,7 @@ public sealed class LumaEngineCriticalTests
         {
             context.CancellationToken.ThrowIfCancellationRequested();
             AddItem(new TestItem(_itemId));
-            foreach (var child in _children)
-            {
-                AddChild(child);
-            }
+            foreach (var child in _children) AddChild(child);
 
             await Task.CompletedTask.ConfigureAwait(false);
             yield break;

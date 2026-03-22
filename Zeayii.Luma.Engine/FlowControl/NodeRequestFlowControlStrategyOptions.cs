@@ -3,10 +3,10 @@ using System.Net;
 namespace Zeayii.Luma.Engine.FlowControl;
 
 /// <summary>
-/// <b>节点请求流控策略配置</b>
-/// <para>
-/// 描述单个节点类型流控策略在运行期可更新的输入参数。
-/// </para>
+///     <b>节点请求流控策略配置</b>
+///     <para>
+///         描述单个节点类型流控策略在运行期可更新的输入参数。
+///     </para>
 /// </summary>
 /// <param name="ScopeName">流控语义域名称。</param>
 /// <param name="MinIntervalMilliseconds">基础最小请求间隔（毫秒）。</param>
@@ -23,7 +23,7 @@ public readonly record struct NodeRequestFlowControlStrategyOptions(
     int AdaptiveMaxIntervalMilliseconds)
 {
     /// <summary>
-    /// 获取已规范化的最小请求间隔（毫秒）。
+    ///     获取已规范化的最小请求间隔（毫秒）。
     /// </summary>
     /// <returns>非负最小请求间隔。</returns>
     public int ResolveMinIntervalMilliseconds()
@@ -32,7 +32,7 @@ public readonly record struct NodeRequestFlowControlStrategyOptions(
     }
 
     /// <summary>
-    /// 获取已规范化的退避命中次数上限。
+    ///     获取已规范化的退避命中次数上限。
     /// </summary>
     /// <returns>非负命中次数上限。</returns>
     public int ResolveAdaptiveBackoffMaxHits()
@@ -41,26 +41,18 @@ public readonly record struct NodeRequestFlowControlStrategyOptions(
     }
 
     /// <summary>
-    /// 构造退避触发状态码集合。
+    ///     构造退避触发状态码集合。
     /// </summary>
     /// <returns>去重后的状态码集合。</returns>
     public HashSet<int> BuildAdaptiveBackoffStatusCodeSet()
     {
-        if (AdaptiveBackoffStatusCodes is null || AdaptiveBackoffStatusCodes.Count == 0)
-        {
-            return [];
-        }
+        if (AdaptiveBackoffStatusCodes is null || AdaptiveBackoffStatusCodes.Count == 0) return [];
 
         var set = new HashSet<int>();
         foreach (var statusCode in AdaptiveBackoffStatusCodes)
-        {
             if (statusCode is >= (int)HttpStatusCode.Continue and <= 599)
-            {
                 set.Add(statusCode);
-            }
-        }
 
         return set;
     }
 }
-

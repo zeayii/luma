@@ -15,6 +15,21 @@ namespace Zeayii.Luma.Presentation.Window;
 public sealed class PresentationManager(PresentationOptions options, ILogManager logManager, IProgressManager progressManager) : IPresentationManager
 {
     /// <summary>
+    ///     节点区域固定宽度（字符列）。
+    /// </summary>
+    private const int NodesPanelFixedWidth = 92;
+
+    /// <summary>
+    ///     日志区域最小宽度（字符列）。
+    /// </summary>
+    private const int LogsPanelMinimumWidth = 40;
+
+    /// <summary>
+    ///     节点区域最小宽度（字符列）。
+    /// </summary>
+    private const int NodesPanelMinimumWidth = 28;
+
+    /// <summary>
     ///     启动标记。
     /// </summary>
     private bool _isStarted;
@@ -121,21 +136,6 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     }
 
     /// <summary>
-    ///     节点区域固定宽度（字符列）。
-    /// </summary>
-    private const int NodesPanelFixedWidth = 92;
-
-    /// <summary>
-    ///     日志区域最小宽度（字符列）。
-    /// </summary>
-    private const int LogsPanelMinimumWidth = 40;
-
-    /// <summary>
-    ///     节点区域最小宽度（字符列）。
-    /// </summary>
-    private const int NodesPanelMinimumWidth = 28;
-
-    /// <summary>
     ///     渲染整个窗口。
     /// </summary>
     /// <returns>可渲染对象。</returns>
@@ -145,55 +145,35 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
         var progressSnapshot = progressManager.CreateSnapshot();
         var logSnapshot = logManager.CreateSnapshot();
 
-        var header = new Panel(new Markup(
-            $"[bold yellow]{Markup.Escape(options.HeaderBrand)}[/]  " +
-            $"[grey]Command:[/] [green]{Markup.Escape(progressSnapshot.CommandName)}[/]  " +
-            $"[grey]Run:[/] [green]{Markup.Escape(progressSnapshot.RunName)}[/]  " +
-            $"[grey]Stored:[/] [blue]{progressSnapshot.StoredItemCount}[/]  " +
-            $"[grey]Active:[/] [blue]{progressSnapshot.ActiveRequestCount}[/]  " +
-            $"[grey]Queued:[/] [blue]{progressSnapshot.QueuedRequestCount}[/]  " +
-            $"[grey]Elapsed:[/] [blue]{progressSnapshot.Elapsed:hh\\:mm\\:ss}[/]"))
+        var headerGrid = new Grid();
+        headerGrid.AddColumn();
+        headerGrid.AddColumn(new GridColumn().RightAligned());
+        headerGrid.AddRow(
+            new Markup($"[grey]Command:[/] [green]{Markup.Escape(progressSnapshot.CommandName)}[/]  [grey]Run:[/] [green]{Markup.Escape(progressSnapshot.RunName)}[/]"),
+            new Markup(
+                $@"[grey]Stored:[/] [blue]{progressSnapshot.StoredItemCount}[/]  [grey]Active:[/] [blue]{progressSnapshot.ActiveRequestCount}[/]  [grey]Queued:[/] [blue]{progressSnapshot.QueuedRequestCount}[/]  [grey]Elapsed:[/] [blue]{progressSnapshot.Elapsed:hh\:mm\:ss}[/]")
+        );
+
+        var header = new Panel(headerGrid)
         {
             Border = BoxBorder.Rounded,
-            Header = new PanelHeader(" Runtime "),
+            Header = new PanelHeader(" Zeayii Luma "),
             Expand = true
         };
 
         var visibleNodes = SelectNodes(progressSnapshot.Nodes);
         var visibleLogs = SelectLogs(logSnapshot.Entries);
 
-        var leftPanel = new Panel(new Rows(visibleNodes.Select(static line => (IRenderable)new Markup(line)).ToArray()))
-        {
-            Border = BoxBorder.Rounded,
-            Header = new PanelHeader(" Nodes "),
-            Expand = true
-        };
-
-        var rightPanel = new Panel(new Rows(visibleLogs.Select(static line => (IRenderable)new Markup(line)).ToArray()))
-        {
-            Border = BoxBorder.Rounded,
-            Header = new PanelHeader(" Logs "),
-            Expand = true
-        };
+        var leftPanel = new Panel(new Rows(visibleNodes.Select(static IRenderable (line) => new Markup(line)).ToArray())) { Border = BoxBorder.Rounded, Header = new PanelHeader(" Nodes "), Expand = true };
+        var rightPanel = new Panel(new Rows(visibleLogs.Select(static IRenderable (line) => new Markup(line)).ToArray())) { Border = BoxBorder.Rounded, Header = new PanelHeader(" Logs "), Expand = true };
 
         var terminalWidth = AnsiConsole.Profile.Width;
         var maxNodesWidth = Math.Max(NodesPanelMinimumWidth, terminalWidth - LogsPanelMinimumWidth);
         var effectiveNodesWidth = Math.Min(NodesPanelFixedWidth, maxNodesWidth);
 
         var layout = new Layout("Root");
-        layout.SplitRows(
-            new Layout("Header")
-            {
-                Size = 3
-            },
-            new Layout("Body"));
-        layout["Body"].SplitColumns(
-            new Layout("Nodes")
-            {
-                Size = effectiveNodesWidth
-            },
-            new Layout("Logs"));
-
+        layout.SplitRows(new Layout("Header") { Size = 3 }, new Layout("Body"));
+        layout["Body"].SplitColumns(new Layout("Nodes") { Size = effectiveNodesWidth }, new Layout("Logs"));
         layout["Header"].Update(header);
         layout["Nodes"].Update(leftPanel);
         layout["Logs"].Update(rightPanel);
@@ -209,15 +189,18 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     {
         if (nodes.Count == 0) return ["[grey]No nodes[/]"];
 
-        var start = Math.Min(_nodeOffset, Math.Max(0, nodes.Count - 1));
+        var visibleLineCount = ResolveBodyVisibleLineCount();
+        var maxOffset = Math.Max(0, nodes.Count - visibleLineCount);
+        _nodeOffset = Math.Clamp(_nodeOffset, 0, maxOffset);
+        var start = Math.Max(0, nodes.Count - visibleLineCount - _nodeOffset);
         return nodes
             .Skip(start)
-            .Take(20)
+            .Take(visibleLineCount)
             .Select(static node =>
             {
                 var reasonText = string.IsNullOrWhiteSpace(node.Reason) ? string.Empty : $" [darkorange]Reason={Markup.Escape(node.Reason)}[/]";
                 return
-                    $"{new string(' ', node.Depth * 2)}[{ResolveNodeColor(node.Status)}]{Markup.Escape(node.DisplayText)}[/] [grey](Path={Markup.Escape(node.Path)}, Stored={node.StoredCount}, Exists={node.AlreadyExistsCount}, Q={node.QueuedRequestCount}, A={node.ActiveRequestCount})[/]{reasonText}";
+                    $"{new string(' ', node.Depth * 2)}[{ResolveNodeColor(node.Status)}]{Markup.Escape(node.DisplayText)}[/] [grey](Stored={node.StoredCount}, Exists={node.AlreadyExistsCount}, Queued={node.QueuedRequestCount}, Active={node.ActiveRequestCount})[/]{reasonText}";
             })
             .ToArray();
     }
@@ -231,12 +214,28 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     {
         if (logEntries.Count == 0) return ["[grey]No logs[/]"];
 
-        var start = Math.Min(_logOffset, Math.Max(0, logEntries.Count - 1));
+        var visibleLineCount = ResolveBodyVisibleLineCount();
+        var maxOffset = Math.Max(0, logEntries.Count - visibleLineCount);
+        _logOffset = Math.Clamp(_logOffset, 0, maxOffset);
+        var start = Math.Max(0, logEntries.Count - visibleLineCount - _logOffset);
         return logEntries
             .Skip(start)
-            .Take(20)
+            .Take(visibleLineCount)
             .Select(static entry => $"[grey]{entry.Timestamp:HH:mm:ss}[/] [{ResolveLogColor(entry.Level)}]{Markup.Escape(entry.Tag)}[/] {Markup.Escape(entry.Message)}")
             .ToArray();
+    }
+
+    /// <summary>
+    ///     解析主体区域可显示行数。
+    /// </summary>
+    /// <returns>可显示行数。</returns>
+    private static int ResolveBodyVisibleLineCount()
+    {
+        const int headerRows = 3;
+        const int panelBorderRows = 2;
+        var terminalHeight = Math.Max(1, AnsiConsole.Profile.Height);
+        var bodyRows = Math.Max(1, terminalHeight - headerRows);
+        return Math.Max(1, bodyRows - panelBorderRows);
     }
 
     /// <summary>
@@ -252,17 +251,25 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
                 switch (key.Key)
                 {
                     case ConsoleKey.UpArrow:
-                        _logOffset = Math.Max(0, _logOffset - 1);
-                        break;
-                    case ConsoleKey.DownArrow:
+                    {
                         _logOffset++;
                         break;
-                    case ConsoleKey.PageUp:
-                        _logOffset = Math.Max(0, _logOffset - 10);
+                    }
+                    case ConsoleKey.DownArrow:
+                    {
+                        _logOffset = Math.Max(0, _logOffset - 1);
                         break;
-                    case ConsoleKey.PageDown:
+                    }
+                    case ConsoleKey.PageUp:
+                    {
                         _logOffset += 10;
                         break;
+                    }
+                    case ConsoleKey.PageDown:
+                    {
+                        _logOffset = Math.Max(0, _logOffset - 10);
+                        break;
+                    }
                 }
 
                 continue;
@@ -271,20 +278,30 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
-                    _nodeOffset = Math.Max(0, _nodeOffset - 1);
-                    break;
-                case ConsoleKey.DownArrow:
+                {
                     _nodeOffset++;
                     break;
-                case ConsoleKey.PageUp:
-                    _nodeOffset = Math.Max(0, _nodeOffset - 10);
+                }
+                case ConsoleKey.DownArrow:
+                {
+                    _nodeOffset = Math.Max(0, _nodeOffset - 1);
                     break;
-                case ConsoleKey.PageDown:
+                }
+                case ConsoleKey.PageUp:
+                {
                     _nodeOffset += 10;
                     break;
+                }
+                case ConsoleKey.PageDown:
+                {
+                    _nodeOffset = Math.Max(0, _nodeOffset - 10);
+                    break;
+                }
                 case ConsoleKey.Q:
+                {
                     Interlocked.Exchange(ref _stopRequested, 1);
                     break;
+                }
             }
         }
     }

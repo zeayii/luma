@@ -59,11 +59,6 @@ internal sealed class ApplicationOptions
     public required NetLogLevel NetLogLevel { get; init; }
 
     /// <summary>
-    ///     标题品牌文本。
-    /// </summary>
-    public required string HeaderBrand { get; init; }
-
-    /// <summary>
     ///     日志最大行数。
     /// </summary>
     public required int MaxLogEntries { get; init; }

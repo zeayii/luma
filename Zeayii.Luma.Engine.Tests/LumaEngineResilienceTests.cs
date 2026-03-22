@@ -85,7 +85,7 @@ public sealed class LumaEngineResilienceTests
     public async Task RunAsyncShouldStopNodeWhenAlreadyExistsThresholdReached()
     {
         var node = new ThresholdNode("root", "https://example.com/already", new TestItem("Y"), 1);
-        var fixture = CreateFixture(storeBehavior: static _ => [PersistResult.AlreadyExists("exists", false)]);
+        var fixture = CreateFixture(storeBehavior: static _ => [PersistResult.AlreadyExists("exists")]);
 
         await fixture.CreateEngine().RunAsync(new StaticSpider(node), "test-command", "run-threshold", CancellationToken.None).ConfigureAwait(true);
 

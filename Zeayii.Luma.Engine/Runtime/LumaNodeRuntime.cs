@@ -26,14 +26,14 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     private readonly SemaphoreSlim? _requestExecutionGate;
 
     /// <summary>
+    ///     子树完成通知源。
+    /// </summary>
+    private readonly TaskCompletionSource _subtreeCompletionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
     ///     释放标记。
     /// </summary>
     private int _disposed;
-
-    /// <summary>
-    ///     子节点注册中的数量。
-    /// </summary>
-    private long _registeringChildCount;
 
     /// <summary>
     ///     节点初始化中的数量。
@@ -49,14 +49,14 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     private long _pendingChildSubtreeCount;
 
     /// <summary>
+    ///     子节点注册中的数量。
+    /// </summary>
+    private long _registeringChildCount;
+
+    /// <summary>
     ///     子树完成标记。
     /// </summary>
     private int _subtreeCompleted;
-
-    /// <summary>
-    ///     子树完成通知源。
-    /// </summary>
-    private readonly TaskCompletionSource _subtreeCompletionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
     ///     初始化节点运行时。
@@ -272,10 +272,7 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     /// <returns>本次调用是否完成子树。</returns>
     public bool TryCompleteSubtree()
     {
-        if (Volatile.Read(ref _subtreeCompleted) != 0)
-        {
-            return false;
-        }
+        if (Volatile.Read(ref _subtreeCompleted) != 0) return false;
 
         if (State.ActiveRequestCount > 0 ||
             State.QueuedRequestCount > 0 ||
@@ -283,19 +280,11 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
             InitializingCount > 0 ||
             PendingChildSubtreeCount > 0 ||
             State.Status == NodeExecutionStatus.Pending)
-        {
             return false;
-        }
 
-        if (Interlocked.CompareExchange(ref _subtreeCompleted, 1, 0) != 0)
-        {
-            return false;
-        }
+        if (Interlocked.CompareExchange(ref _subtreeCompleted, 1, 0) != 0) return false;
 
-        if (State.Status is NodeExecutionStatus.Running or NodeExecutionStatus.Stopping)
-        {
-            State.SetStatus(CancellationTokenSource.IsCancellationRequested ? NodeExecutionStatus.Cancelled : NodeExecutionStatus.Completed, State.Reason);
-        }
+        if (State.Status is NodeExecutionStatus.Running or NodeExecutionStatus.Stopping) State.SetStatus(CancellationTokenSource.IsCancellationRequested ? NodeExecutionStatus.Cancelled : NodeExecutionStatus.Completed, State.Reason);
 
         _subtreeCompletionSource.TrySetResult();
         return true;

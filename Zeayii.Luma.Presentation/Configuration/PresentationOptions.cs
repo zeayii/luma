@@ -8,11 +8,6 @@ namespace Zeayii.Luma.Presentation.Configuration;
 public sealed class PresentationOptions
 {
     /// <summary>
-    ///     标题品牌文本。
-    /// </summary>
-    public required string HeaderBrand { get; init; }
-
-    /// <summary>
     ///     控制台日志最低输出级别。
     /// </summary>
     public required LogLevel MinimumLogLevel { get; init; }

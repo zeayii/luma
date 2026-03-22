@@ -15,11 +15,6 @@ namespace Zeayii.Luma.CommandLine.Options;
 internal static class CommonCommandOptionsBuilder
 {
     /// <summary>
-    ///     固定品牌标题文本。
-    /// </summary>
-    private const string FixedHeaderBrand = "Zeayii Luma";
-
-    /// <summary>
     ///     将通用参数添加到命令对象。
     /// </summary>
     /// <param name="command">命令对象。</param>
@@ -203,7 +198,6 @@ internal static class CommonCommandOptionsBuilder
             LogTotalSizeMegabytes = parseResult.GetValue(options.LogTotalSizeMegabytesOption),
             LogFileSizeMegabytes = parseResult.GetValue(options.LogFileSizeMegabytesOption),
             NetLogLevel = parseResult.GetValue(options.NetLogLevelOption),
-            HeaderBrand = FixedHeaderBrand,
             MaxLogEntries = parseResult.GetValue(options.MaxLogEntriesOption),
             RefreshIntervalMilliseconds = parseResult.GetValue(options.RefreshIntervalMillisecondsOption),
             DownloadWorkerCount = parseResult.GetValue(options.DownloadWorkerCountOption),

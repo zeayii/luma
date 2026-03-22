@@ -42,7 +42,6 @@ internal static class OptionsBuilder
         ArgumentNullException.ThrowIfNull(applicationOptions);
         return new PresentationOptions
         {
-            HeaderBrand = applicationOptions.HeaderBrand,
             MinimumLogLevel = applicationOptions.ConsoleLogLevel,
             MaxLogEntries = applicationOptions.MaxLogEntries,
             RefreshInterval = TimeSpan.FromMilliseconds(applicationOptions.RefreshIntervalMilliseconds)
