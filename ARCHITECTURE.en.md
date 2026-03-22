@@ -25,21 +25,26 @@
 
 ## 3. Node Lifecycle
 
-1. `StartAsync(context)`
-- Startup stage that emits an initial `NodeResult`.
+1. `BuildRequestsAsync(context)`
+- Request-build stage that emits initial request stream.
 
 2. `HandleResponseAsync(response, context)`
-- Response stage that emits next requests, children, and items.
+- Normal response stage where node accumulates follow-up requests, children, and items.
 
-3. `ShouldPersistAsync(item, persistContext)`
+3. Download stages (optional)
+- `ShouldDownloadAsync(response, context)`
+- `BuildDownloadRequestsAsync(response, context)`
+- `HandleDownloadResponseAsync(response, request, context)`
+
+4. `ShouldPersistAsync(item, persistContext)`
 - Node-level persistence filter.
 
-4. `OnPersistedAsync(item, persistResult, persistContext)`
+5. `OnPersistedAsync(item, persistResult, persistContext)`
 - Node-level persistence callback.
 
 ## 4. Data Model Semantics
 
-1. `NodeResult`
+1. `NodeDispatchBatch`
 - `Requests`
 - `Children`
 - `Items`
@@ -65,19 +70,18 @@ sequenceDiagram
     participant Engine as LumaEngine
     participant Spider as ISpider<TState>
     participant Node as LumaNode<TState>
-    participant Downloader as IDownloader
+    participant Net as INetClient
     participant Sink as IItemSink
 
     Host->>Engine: RunAsync(spider)
     Engine->>Spider: CreateStateAsync
     Engine->>Spider: CreateRootAsync(state)
     Spider-->>Engine: RootNode
-    Engine->>Node: StartAsync
-    Node-->>Engine: NodeResult
-    Engine->>Downloader: DownloadAsync
-    Downloader-->>Engine: HttpResponseMessage
+    Engine->>Node: BuildRequestsAsync
+    Engine->>Net: SendAsync
+    Net-->>Engine: HttpResponseMessage
     Engine->>Node: HandleResponseAsync
-    Node-->>Engine: NodeResult
+    Engine->>Node: ShouldDownloadAsync / BuildDownloadRequestsAsync / HandleDownloadResponseAsync
     Engine->>Node: ShouldPersistAsync
     Engine->>Sink: StoreBatchAsync
     Engine->>Node: OnPersistedAsync

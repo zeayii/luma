@@ -25,21 +25,26 @@
 
 ## 3. Node 生命周期
 
-1. `StartAsync(context)`
-- 节点启动阶段，产出初始 `NodeResult`。
+1. `BuildRequestsAsync(context)`
+- 节点请求构建阶段，产出初始请求流。
 
 2. `HandleResponseAsync(response, context)`
-- 响应处理阶段，产出后续请求、子节点与数据项。
+- 普通响应处理阶段，节点可累积后续请求、子节点与数据项。
 
-3. `ShouldPersistAsync(item, persistContext)`
+3. 下载相关阶段（可选）
+- `ShouldDownloadAsync(response, context)`
+- `BuildDownloadRequestsAsync(response, context)`
+- `HandleDownloadResponseAsync(response, request, context)`
+
+4. `ShouldPersistAsync(item, persistContext)`
 - 节点级持久化过滤。
 
-4. `OnPersistedAsync(item, persistResult, persistContext)`
+5. `OnPersistedAsync(item, persistResult, persistContext)`
 - 节点级持久化回调。
 
 ## 4. 数据模型语义
 
-1. `NodeResult`
+1. `NodeDispatchBatch`
 - `Requests`
 - `Children`
 - `Items`
@@ -65,19 +70,18 @@ sequenceDiagram
     participant Engine as LumaEngine
     participant Spider as ISpider<TState>
     participant Node as LumaNode<TState>
-    participant Downloader as IDownloader
+    participant Net as INetClient
     participant Sink as IItemSink
 
     Host->>Engine: RunAsync(spider)
     Engine->>Spider: CreateStateAsync
     Engine->>Spider: CreateRootAsync(state)
     Spider-->>Engine: RootNode
-    Engine->>Node: StartAsync
-    Node-->>Engine: NodeResult
-    Engine->>Downloader: DownloadAsync
-    Downloader-->>Engine: HttpResponseMessage
+    Engine->>Node: BuildRequestsAsync
+    Engine->>Net: SendAsync
+    Net-->>Engine: HttpResponseMessage
     Engine->>Node: HandleResponseAsync
-    Node-->>Engine: NodeResult
+    Engine->>Node: ShouldDownloadAsync / BuildDownloadRequestsAsync / HandleDownloadResponseAsync
     Engine->>Node: ShouldPersistAsync
     Engine->>Sink: StoreBatchAsync
     Engine->>Node: OnPersistedAsync

@@ -11,7 +11,7 @@
 3. 定义共享模型：
 
 - `LumaRequest`（持有 `HttpRequestMessage`） / `HttpResponseMessage`
-- `NodeResult` / `NodeExecutionOptions`
+- `NodeDispatchBatch` / `NodeExecutionOptions`
 - `LumaContext<TState>`（Context 对外暴露解析与 Cookie 能力函数）
 - `PersistResult` / `PersistContext`
 

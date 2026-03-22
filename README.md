@@ -33,11 +33,12 @@ Zeayii.Luma 是一个面向站点抓取场景的 Node 驱动运行时框架。
 - `CreateStateAsync`
 - `CreateRootAsync(state, cancellationToken)`
 2. `LumaNode<TState>` 生命周期：
-- `StartAsync`
+- `BuildRequestsAsync`
 - `HandleResponseAsync`
+- `ShouldDownloadAsync` / `BuildDownloadRequestsAsync` / `HandleDownloadResponseAsync`
 - `ShouldPersistAsync`
 - `OnPersistedAsync`
-3. `NodeResult`：节点阶段产出对象（`Requests` / `Children` / `Items` / 停止信号）。
+3. `NodeDispatchBatch`：节点阶段产出批次（`Requests` / `Children` / `Items` / 停止信号）。
 4. `NodeExecutionOptions`：
 - `ChildTraversalPolicy`
 - `ChildMaxConcurrency`
@@ -52,7 +53,7 @@ sequenceDiagram
     participant Engine as LumaEngine
     participant Spider as ISpider<TState>
     participant Node as LumaNode<TState>
-    participant Downloader as IDownloader
+    participant Net as INetClient
     participant Sink as IItemSink
     participant UI as IPresentationManager
 
@@ -60,12 +61,13 @@ sequenceDiagram
     Engine->>Spider: CreateStateAsync
     Engine->>Spider: CreateRootAsync(state)
     Spider-->>Engine: RootNode
-    Engine->>Node: StartAsync(context)
-    Node-->>Engine: NodeResult(Requests/Children/Items)
-    Engine->>Downloader: DownloadAsync(request)
-    Downloader-->>Engine: HttpResponseMessage
+    Engine->>Node: BuildRequestsAsync(context)
+    Engine->>Net: SendAsync(request)
+    Net-->>Engine: HttpResponseMessage
     Engine->>Node: HandleResponseAsync(response, context)
-    Node-->>Engine: NodeResult(Requests/Children/Items)
+    Engine->>Node: ShouldDownloadAsync(response, context)
+    Engine->>Node: BuildDownloadRequestsAsync(response, context)
+    Engine->>Node: HandleDownloadResponseAsync(response, request, context)
     Engine->>Node: ShouldPersistAsync(item)
     Engine->>Sink: StoreBatchAsync(items)
     Engine->>Node: OnPersistedAsync(item, result)
