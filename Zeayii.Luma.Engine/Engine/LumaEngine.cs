@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics;
 using System.Net;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -103,6 +104,11 @@ public sealed class LumaEngine<TState>
     private readonly TimeProvider _timeProvider;
 
     /// <summary>
+    ///     子节点槽位等待诊断阈值（毫秒）。
+    /// </summary>
+    private const int ChildSlotWaitDiagnosticThresholdMilliseconds = 2000;
+
+    /// <summary>
     ///     当前活跃网络任务数量。
     /// </summary>
     private long _activeNetworkCount;
@@ -193,10 +199,10 @@ public sealed class LumaEngine<TState>
                 var rootState = await spider.CreateStateAsync(runRuntime.Token).ConfigureAwait(false);
                 var rootNode = await spider.CreateRootAsync(rootState, runRuntime.Token).ConfigureAwait(false);
                 var effectiveRequestWorkerCount = ResolveEffectiveRequestWorkerCount(rootNode);
-                var requestScheduler = new NodeTaskScheduler(_options.RequestChannelCapacity, effectiveRequestWorkerCount);
-                var downloadScheduler = new NodeTaskScheduler(_options.DownloadChannelCapacity, _options.DownloadWorkerCount);
+                var requestScheduler = new NodeTaskScheduler(_options.RequestChannelCapacity);
+                var downloadScheduler = new NodeTaskScheduler(_options.DownloadChannelCapacity);
                 var effectivePersistWorkerCount = ResolveEffectivePersistWorkerCount(rootNode);
-                var persistScheduler = new PriorityTaskScheduler<ItemEnvelope<TState>>(_options.PersistChannelCapacity, effectivePersistWorkerCount);
+                var persistScheduler = new PriorityTaskScheduler<ItemEnvelope<TState>>(_options.PersistChannelCapacity);
                 var cookieAccessor = new NetCookieAccessor(_netClient, ResolveRouteKind);
 
                 try
@@ -628,32 +634,103 @@ public sealed class LumaEngine<TState>
 
         if (!shouldBlockExpansion && dispatchBatch.Children.Count > 0)
         {
-            await RegisterChildrenAsync(dispatchBatch.Children, runtime, runRuntime, requestScheduler, persistScheduler).ConfigureAwait(false);
+            EnqueueChildrenForExpansion(dispatchBatch.Children, runtime, runRuntime, requestScheduler, persistScheduler);
         }
     }
 
     /// <summary>
-    ///     按节点策略注册子节点。
+    ///     将子节点批次加入扩展队列，并按需启动扩展泵。
     /// </summary>
     /// <param name="children">子节点集合。</param>
     /// <param name="parentRuntime">父节点运行时。</param>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <param name="requestScheduler">普通请求调度器。</param>
     /// <param name="persistScheduler">持久化调度器。</param>
-    /// <returns>异步任务。</returns>
-    private async Task RegisterChildrenAsync(IReadOnlyList<NodeChildBinding<TState>> children, LumaNodeRuntime<TState> parentRuntime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler,
+    private void EnqueueChildrenForExpansion(IReadOnlyList<NodeChildBinding<TState>> children, LumaNodeRuntime<TState> parentRuntime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler,
         PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler)
     {
-        var tasks = new List<Task>(children.Count);
-
-        foreach (var childBinding in children)
+        if (children.Count == 0)
         {
-            await parentRuntime.WaitChildSlotAsync(parentRuntime.Context.CancellationToken).ConfigureAwait(false);
-            parentRuntime.IncrementRegisteringChild();
-            tasks.Add(RegisterChildInternalAsync(childBinding, parentRuntime, runRuntime, requestScheduler, persistScheduler));
+            return;
         }
 
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+        parentRuntime.EnqueuePendingChildRegistrations(children);
+        SignalStateChanged(parentRuntime);
+
+        if (!parentRuntime.TryAcquireExpansionPump())
+        {
+            return;
+        }
+
+        _ = RunExpansionPumpAsync(parentRuntime, runRuntime, requestScheduler, persistScheduler);
+    }
+
+    /// <summary>
+    ///     运行父节点扩展泵。
+    ///     <para>
+    ///         扩展泵独立于请求工作线程，负责按父节点并发上限启动子节点，避免在请求热路径中等待子槽位。
+    ///     </para>
+    /// </summary>
+    /// <param name="parentRuntime">父节点运行时。</param>
+    /// <param name="runRuntime">运行时宿主。</param>
+    /// <param name="requestScheduler">普通请求调度器。</param>
+    /// <param name="persistScheduler">持久化调度器。</param>
+    /// <returns>异步任务。</returns>
+    private async Task RunExpansionPumpAsync(LumaNodeRuntime<TState> parentRuntime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler, PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler)
+    {
+        while (true)
+        {
+            var shouldRestart = false;
+            try
+            {
+                var childIndex = 0;
+                while (!runRuntime.Token.IsCancellationRequested && !parentRuntime.CancellationTokenSource.IsCancellationRequested)
+                {
+                    if (!parentRuntime.TryDequeuePendingChildRegistration(out var childBinding))
+                    {
+                        return;
+                    }
+
+                    childIndex++;
+                    var waitStopwatch = Stopwatch.StartNew();
+                    await parentRuntime.WaitChildSlotAsync(parentRuntime.Context.CancellationToken).ConfigureAwait(false);
+                    waitStopwatch.Stop();
+                    if (waitStopwatch.ElapsedMilliseconds >= ChildSlotWaitDiagnosticThresholdMilliseconds)
+                    {
+                        WriteUnifiedLog(
+                            LogLevelKind.Warning,
+                            "Scheduler",
+                            $"Event=ChildSlotWaitSlow ParentNodePath={parentRuntime.Path} ChildIndex={childIndex} WaitMs={waitStopwatch.ElapsedMilliseconds} ParentRegisteringChildCount={parentRuntime.RegisteringChildCount} ParentPendingChildRegistrationCount={parentRuntime.PendingChildRegistrationCount} ParentPendingChildSubtreeCount={parentRuntime.PendingChildSubtreeCount} RequestQueueCount={requestScheduler.Count} ActiveNetworkCount={Interlocked.Read(ref _activeNetworkCount)}");
+                    }
+
+                    parentRuntime.IncrementRegisteringChild();
+                    await RegisterChildInternalAsync(childBinding, parentRuntime, runRuntime, requestScheduler, persistScheduler).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // ignore
+            }
+            catch (Exception exception)
+            {
+                WriteUnifiedLog(LogLevelKind.Error, "Scheduler", $"Event=ExpansionPumpFailed ParentNodePath={parentRuntime.Path} ErrorMessage={exception.Message}", exception);
+            }
+            finally
+            {
+                parentRuntime.ReleaseExpansionPump();
+                SignalStateChanged(parentRuntime);
+
+                if (!runRuntime.Token.IsCancellationRequested && !parentRuntime.CancellationTokenSource.IsCancellationRequested && parentRuntime.PendingChildRegistrationCount > 0 && parentRuntime.TryAcquireExpansionPump())
+                {
+                    shouldRestart = true;
+                }
+            }
+
+            if (!shouldRestart)
+            {
+                return;
+            }
+        }
     }
 
     /// <summary>
@@ -986,6 +1063,7 @@ public sealed class LumaEngine<TState>
         }
 
         WriteUnifiedLog(LogLevelKind.Debug, "Persist", $"Event=PersistBatchResolved BufferedCount={buffer.Count} PersistedCount={filteredEnvelopes.Count} ResultCount={batchPersistResults.Count}");
+        WritePersistBatchSummaryLog(buffer.Count, filteredEnvelopes.Count, resolvedResults);
 
         for (var index = 0; index < buffer.Count; index++)
         {
@@ -1130,7 +1208,8 @@ public sealed class LumaEngine<TState>
         }
 
         return _nodeRuntimes.Values.All(static runtime =>
-            runtime is { State: { ActiveRequestCount: <= 0, QueuedRequestCount: <= 0 }, RegisteringChildCount: <= 0, InitializingCount: <= 0, PendingChildSubtreeCount: <= 0 });
+            runtime is { State: { ActiveRequestCount: <= 0, QueuedRequestCount: <= 0 }, RegisteringChildCount: <= 0, InitializingCount: <= 0, PendingChildSubtreeCount: <= 0, PendingChildRegistrationCount: <= 0 } &&
+            !runtime.IsExpansionPumpRunning);
     }
 
     /// <summary>
@@ -1226,6 +1305,57 @@ public sealed class LumaEngine<TState>
 
         WriteUnifiedLog(LogLevelKind.Debug, "Engine",
             $"Event=RunWaitingState InitializingNodeCount={Interlocked.Read(ref _initializingNodeCount)} QueuedRequestCount={requestScheduler.Count} QueuedDownloadCount={downloadScheduler.Count} ActiveNetworkCount={Interlocked.Read(ref _activeNetworkCount)}");
+    }
+
+    /// <summary>
+    ///     输出持久化批次摘要日志。
+    /// </summary>
+    /// <param name="bufferedCount">批次缓存总数。</param>
+    /// <param name="persistedCount">批次实际持久化输入数。</param>
+    /// <param name="results">批次结果集合。</param>
+    private void WritePersistBatchSummaryLog(int bufferedCount, int persistedCount, IReadOnlyList<PersistResult> results)
+    {
+        var storedCount = 0;
+        var existsCount = 0;
+        var failedCount = 0;
+        var skippedCount = 0;
+
+        foreach (var result in results)
+        {
+            switch (result.Decision)
+            {
+                case PersistDecision.Stored:
+                {
+                    storedCount++;
+                    break;
+                }
+                case PersistDecision.AlreadyExists:
+                {
+                    existsCount++;
+                    break;
+                }
+                case PersistDecision.Failed:
+                {
+                    failedCount++;
+                    break;
+                }
+                case PersistDecision.Skipped:
+                {
+                    skippedCount++;
+                    break;
+                }
+            }
+        }
+
+        if (storedCount <= 0 && existsCount <= 0 && failedCount <= 0 && skippedCount <= 0)
+        {
+            return;
+        }
+
+        WriteUnifiedLog(
+            LogLevelKind.Information,
+            "Persist",
+            $"Event=PersistBatchSummary BufferedCount={bufferedCount} PersistedInputCount={persistedCount} StoredCount={storedCount} ExistsCount={existsCount} FailedCount={failedCount} SkippedCount={skippedCount}");
     }
 
     /// <summary>

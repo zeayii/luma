@@ -1,3 +1,5 @@
+using System.Threading.Channels;
+
 namespace Zeayii.Luma.Engine.Scheduling;
 
 /// <summary>
@@ -8,33 +10,17 @@ namespace Zeayii.Luma.Engine.Scheduling;
 /// </summary>
 /// <typeparam name="TItem">任务项类型。</typeparam>
 /// <param name="capacity">队列容量上限。</param>
-/// <param name="consumerCount">消费者数量。</param>
-internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCount) : IDisposable
+internal sealed class PriorityTaskScheduler<TItem>(int capacity) : IDisposable
 {
     /// <summary>
-    ///     可读信号量。
+    ///     调度通道。
     /// </summary>
-    private readonly SemaphoreSlim _availableItems = new(0);
-
-    /// <summary>
-    ///     可写槽位信号量。
-    /// </summary>
-    private readonly SemaphoreSlim _availableSlots = new(Math.Max(1, capacity), Math.Max(1, capacity));
-
-    /// <summary>
-    ///     消费者数量。
-    /// </summary>
-    private readonly int _consumerCount = Math.Max(1, consumerCount);
-
-    /// <summary>
-    ///     普通队列。
-    /// </summary>
-    private readonly LinkedList<TItem> _normalQueue = [];
-
-    /// <summary>
-    ///     队列同步锁。
-    /// </summary>
-    private readonly Lock _syncRoot = new();
+    private readonly Channel<TItem> _channel = Channel.CreateBounded<TItem>(new BoundedChannelOptions(Math.Max(1, capacity))
+    {
+        SingleReader = false,
+        SingleWriter = false,
+        FullMode = BoundedChannelFullMode.Wait
+    });
 
     /// <summary>
     ///     完成标记。
@@ -56,8 +42,7 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
     /// </summary>
     public void Dispose()
     {
-        _availableItems.Dispose();
-        _availableSlots.Dispose();
+        // Channel 调度器无非托管资源，保留空实现以兼容调用方释放路径。
     }
 
     /// <summary>
@@ -68,12 +53,13 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
     /// <returns>异步任务。</returns>
     public async ValueTask EnqueueAsync(TItem item, CancellationToken cancellationToken)
     {
+        var countIncremented = false;
+
         if (Volatile.Read(ref _completed) != 0)
         {
             throw new InvalidOperationException("Scheduler is completed.");
         }
 
-        await _availableSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -82,18 +68,26 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
                 throw new InvalidOperationException("Scheduler is completed.");
             }
 
-            lock (_syncRoot)
+            Interlocked.Increment(ref _count);
+            countIncremented = true;
+            await _channel.Writer.WriteAsync(item, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ChannelClosedException)
+        {
+            if (countIncremented)
             {
-                _normalQueue.AddLast(item);
-
-                Interlocked.Increment(ref _count);
+                Interlocked.Decrement(ref _count);
             }
 
-            _availableItems.Release();
+            throw new InvalidOperationException("Scheduler is completed.");
         }
         catch
         {
-            _availableSlots.Release();
+            if (countIncremented)
+            {
+                Interlocked.Decrement(ref _count);
+            }
+
             throw;
         }
     }
@@ -105,37 +99,17 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
     /// <returns>出队结果（HasItem=false 表示完成且无数据）。</returns>
     public async ValueTask<(bool HasItem, TItem Item)> DequeueAsync(CancellationToken cancellationToken)
     {
-        while (true)
+        while (await _channel.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0)
+            if (_channel.Reader.TryRead(out var item))
             {
-                return (false, default!);
-            }
-
-            await _availableItems.WaitAsync(cancellationToken).ConfigureAwait(false);
-            lock (_syncRoot)
-            {
-                LinkedListNode<TItem>? node = null;
-                if (_normalQueue.First is not null)
-                {
-                    node = _normalQueue.First;
-                    _normalQueue.RemoveFirst();
-                }
-
-                if (node is not null)
-                {
-                    Interlocked.Decrement(ref _count);
-                    _availableSlots.Release();
-                    return (true, node.Value);
-                }
-            }
-
-            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0)
-            {
-                return (false, default!);
+                Interlocked.Decrement(ref _count);
+                return (true, item);
             }
         }
+
+        return (false, default!);
     }
 
     /// <summary>
@@ -145,26 +119,15 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
     /// <returns>是否成功。</returns>
     public bool TryDequeue(out TItem item)
     {
-        lock (_syncRoot)
+        if (_channel.Reader.TryRead(out var readItem))
         {
-            LinkedListNode<TItem>? node = null;
-            if (_normalQueue.First is not null)
-            {
-                node = _normalQueue.First;
-                _normalQueue.RemoveFirst();
-            }
-
-            if (node is null)
-            {
-                item = default!;
-                return false;
-            }
-
+            item = readItem;
             Interlocked.Decrement(ref _count);
-            _availableSlots.Release();
-            item = node.Value;
             return true;
         }
+
+        item = default!;
+        return false;
     }
 
     /// <summary>
@@ -177,6 +140,6 @@ internal sealed class PriorityTaskScheduler<TItem>(int capacity, int consumerCou
             return;
         }
 
-        _availableItems.Release(_consumerCount);
+        _channel.Writer.TryComplete();
     }
 }

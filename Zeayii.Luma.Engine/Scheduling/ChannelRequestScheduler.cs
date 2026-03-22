@@ -1,4 +1,5 @@
 using Zeayii.Luma.Abstractions.Models;
+using System.Threading.Channels;
 
 namespace Zeayii.Luma.Engine.Scheduling;
 
@@ -9,33 +10,17 @@ namespace Zeayii.Luma.Engine.Scheduling;
 ///     </para>
 /// </summary>
 /// <param name="capacity">队列容量上限。</param>
-/// <param name="consumerCount">消费者数量。</param>
-internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisposable
+internal sealed class NodeTaskScheduler(int capacity) : IDisposable
 {
     /// <summary>
-    ///     可读信号量。
+    ///     调度通道。
     /// </summary>
-    private readonly SemaphoreSlim _availableItems = new(0);
-
-    /// <summary>
-    ///     可写槽位信号量（统一容量背压）。
-    /// </summary>
-    private readonly SemaphoreSlim _availableSlots = new(Math.Max(1, capacity), Math.Max(1, capacity));
-
-    /// <summary>
-    ///     消费者数量。
-    /// </summary>
-    private readonly int _consumerCount = Math.Max(1, consumerCount);
-
-    /// <summary>
-    ///     普通请求队列。
-    /// </summary>
-    private readonly LinkedList<LumaRequest> _normalQueue = [];
-
-    /// <summary>
-    ///     队列互斥锁。
-    /// </summary>
-    private readonly Lock _syncRoot = new();
+    private readonly Channel<LumaRequest> _channel = Channel.CreateBounded<LumaRequest>(new BoundedChannelOptions(Math.Max(1, capacity))
+    {
+        SingleReader = false,
+        SingleWriter = false,
+        FullMode = BoundedChannelFullMode.Wait
+    });
 
     /// <summary>
     ///     完成标记。
@@ -57,8 +42,7 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
     /// </summary>
     public void Dispose()
     {
-        _availableItems.Dispose();
-        _availableSlots.Dispose();
+        // Channel 调度器无非托管资源，保留空实现以兼容调用方释放路径。
     }
 
     /// <summary>
@@ -70,13 +54,13 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
     public async ValueTask EnqueueAsync(LumaRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var countIncremented = false;
 
         if (Volatile.Read(ref _completed) != 0)
         {
             throw new InvalidOperationException("Scheduler is completed.");
         }
 
-        await _availableSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -85,18 +69,26 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
                 throw new InvalidOperationException("Scheduler is completed.");
             }
 
-            lock (_syncRoot)
+            Interlocked.Increment(ref _count);
+            countIncremented = true;
+            await _channel.Writer.WriteAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ChannelClosedException)
+        {
+            if (countIncremented)
             {
-                _normalQueue.AddLast(request);
-
-                Interlocked.Increment(ref _count);
+                Interlocked.Decrement(ref _count);
             }
 
-            _availableItems.Release();
+            throw new InvalidOperationException("Scheduler is completed.");
         }
         catch
         {
-            _availableSlots.Release();
+            if (countIncremented)
+            {
+                Interlocked.Decrement(ref _count);
+            }
+
             throw;
         }
     }
@@ -108,38 +100,17 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
     /// <returns>请求对象；完成且无数据时返回 null。</returns>
     public async ValueTask<LumaRequest?> DequeueAsync(CancellationToken cancellationToken)
     {
-        while (true)
+        while (await _channel.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0)
+            if (_channel.Reader.TryRead(out var request))
             {
-                return null;
-            }
-
-            await _availableItems.WaitAsync(cancellationToken).ConfigureAwait(false);
-            lock (_syncRoot)
-            {
-                LinkedListNode<LumaRequest>? node = null;
-                if (_normalQueue.First is not null)
-                {
-                    node = _normalQueue.First;
-                    _normalQueue.RemoveFirst();
-                }
-
-                if (node is not null)
-                {
-                    Interlocked.Decrement(ref _count);
-                    _availableSlots.Release();
-                    return node.Value;
-                }
-            }
-
-            if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) == 0)
-            {
-                return null;
+                Interlocked.Decrement(ref _count);
+                return request;
             }
         }
+
+        return null;
     }
 
     /// <summary>
@@ -152,6 +123,6 @@ internal sealed class NodeTaskScheduler(int capacity, int consumerCount) : IDisp
             return;
         }
 
-        _availableItems.Release(_consumerCount);
+        _channel.Writer.TryComplete();
     }
 }
