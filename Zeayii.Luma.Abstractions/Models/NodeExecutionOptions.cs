@@ -9,10 +9,10 @@ namespace Zeayii.Luma.Abstractions.Models;
 public sealed class NodeExecutionOptions
 {
     /// <summary>
-///     初始化节点执行选项。
-/// </summary>
-/// <param name="defaultRouteKind">节点默认路由类型。</param>
-/// <param name="childMaxConcurrency">子节点并发上限。</param>
+    ///     初始化节点执行选项。
+    /// </summary>
+    /// <param name="defaultRouteKind">节点默认路由类型。</param>
+    /// <param name="childMaxConcurrency">子节点并发上限。</param>
     public NodeExecutionOptions(LumaRouteKind defaultRouteKind = LumaRouteKind.Auto, int childMaxConcurrency = 1)
     {
         DefaultRouteKind = defaultRouteKind;
@@ -31,7 +31,7 @@ public sealed class NodeExecutionOptions
 
     /// <summary>
     ///     子节点并发上限。
-/// </summary>
+    /// </summary>
     public int ChildMaxConcurrency { get; }
 
     /// <summary>

@@ -1484,37 +1484,37 @@ public sealed class LumaEngine<TState>
         switch (action)
         {
             case NodeExceptionAction.KeepRunning:
-                {
-                    return true;
-                }
+            {
+                return true;
+            }
             case NodeExceptionAction.StopNode:
-                {
-                    runtime.Cancel(reason);
-                    runtime.State.SetStatus(NodeExecutionStatus.Failed, reason);
-                    SignalStateChanged(runtime);
-                    return true;
-                }
+            {
+                runtime.Cancel(reason);
+                runtime.State.SetStatus(NodeExecutionStatus.Failed, reason);
+                SignalStateChanged(runtime);
+                return true;
+            }
             case NodeExceptionAction.StopRun:
+            {
+                runtime.State.SetStatus(NodeExecutionStatus.Failed, reason);
+                runRuntime.SetStatus("Stopped");
+                if (!runRuntime.CancellationTokenSource.IsCancellationRequested)
                 {
-                    runtime.State.SetStatus(NodeExecutionStatus.Failed, reason);
-                    runRuntime.SetStatus("Stopped");
-                    if (!runRuntime.CancellationTokenSource.IsCancellationRequested)
-                    {
-                        await runRuntime.CancellationTokenSource.CancelAsync().ConfigureAwait(false);
-                    }
-
-                    SignalStateChanged(runtime);
-
-                    return true;
+                    await runRuntime.CancellationTokenSource.CancelAsync().ConfigureAwait(false);
                 }
+
+                SignalStateChanged(runtime);
+
+                return true;
+            }
             case NodeExceptionAction.Rethrow:
-                {
-                    return false;
-                }
+            {
+                return false;
+            }
             default:
-                {
-                    throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown node exception action.");
-                }
+            {
+                throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown node exception action.");
+            }
         }
     }
 
@@ -1556,33 +1556,33 @@ public sealed class LumaEngine<TState>
         switch (exception.Scope)
         {
             case LumaStopScope.Node:
-                {
-                    runtime.Cancel(reason);
-                    SignalStateChanged(runtime);
-                    WriteUnifiedLog(LogLevelKind.Warning, "Engine", $"Event=StopExceptionNodeHandled Phase={phase} NodePath={runtime.Path} Scope={exception.Scope} Reason={reason}");
-                    LumaEngineLogMessages.NodeScopedStopLog(_logger, runtime.Path, exception.Code, reason, null);
-                    return;
-                }
+            {
+                runtime.Cancel(reason);
+                SignalStateChanged(runtime);
+                WriteUnifiedLog(LogLevelKind.Warning, "Engine", $"Event=StopExceptionNodeHandled Phase={phase} NodePath={runtime.Path} Scope={exception.Scope} Reason={reason}");
+                LumaEngineLogMessages.NodeScopedStopLog(_logger, runtime.Path, exception.Code, reason, null);
+                return;
+            }
             case LumaStopScope.Run:
             case LumaStopScope.App:
+            {
+                runtime.State.SetStatus(NodeExecutionStatus.Cancelled, reason);
+                runRuntime.SetStatus("Stopped");
+                if (!runRuntime.CancellationTokenSource.IsCancellationRequested)
                 {
-                    runtime.State.SetStatus(NodeExecutionStatus.Cancelled, reason);
-                    runRuntime.SetStatus("Stopped");
-                    if (!runRuntime.CancellationTokenSource.IsCancellationRequested)
-                    {
-                        await runRuntime.CancellationTokenSource.CancelAsync().ConfigureAwait(false);
-                    }
-
-                    SignalStateChanged(runtime);
-
-                    WriteUnifiedLog(LogLevelKind.Error, "Engine", $"Event=StopExceptionRunStopped Phase={phase} NodePath={runtime.Path} Scope={exception.Scope} Reason={reason}");
-                    LumaEngineLogMessages.RunScopedStopLog(_logger, runtime.Path, exception.Scope.ToString(), exception.Code, reason, null);
-                    return;
+                    await runRuntime.CancellationTokenSource.CancelAsync().ConfigureAwait(false);
                 }
+
+                SignalStateChanged(runtime);
+
+                WriteUnifiedLog(LogLevelKind.Error, "Engine", $"Event=StopExceptionRunStopped Phase={phase} NodePath={runtime.Path} Scope={exception.Scope} Reason={reason}");
+                LumaEngineLogMessages.RunScopedStopLog(_logger, runtime.Path, exception.Scope.ToString(), exception.Code, reason, null);
+                return;
+            }
             default:
-                {
-                    throw new ArgumentOutOfRangeException(nameof(exception), exception.Scope, "Unknown stop scope.");
-                }
+            {
+                throw new ArgumentOutOfRangeException(nameof(exception), exception.Scope, "Unknown stop scope.");
+            }
         }
     }
 
