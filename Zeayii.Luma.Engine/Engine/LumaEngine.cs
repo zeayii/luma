@@ -897,11 +897,12 @@ public sealed class LumaEngine<TState>
                 options.AdaptiveBackoffStatusCodes,
                 options.AdaptiveBackoffMaxHits,
                 options.AdaptiveMaxIntervalMilliseconds,
+                options.AdaptiveInitialIntervalMilliseconds,
                 options.FlowControlStrategyKey,
                 _timeProvider,
                 _flowControlStrategyResolver));
         controller.Update(options.ScopeName, options.MinIntervalMilliseconds, options.AdaptiveBackoffEnabled, options.AdaptiveBackoffStatusCodes, options.AdaptiveBackoffMaxHits, options.AdaptiveMaxIntervalMilliseconds,
-            options.FlowControlStrategyKey);
+            options.AdaptiveInitialIntervalMilliseconds, options.FlowControlStrategyKey);
         return ValueTask.FromResult<NodeTypeRequestFlowController?>(controller);
     }
 
@@ -1693,6 +1694,7 @@ public sealed class LumaEngine<TState>
         /// <param name="adaptiveBackoffStatusCodes">触发自适应退避的状态码集合。</param>
         /// <param name="adaptiveBackoffMaxHits">自适应退避命中次数上限。</param>
         /// <param name="adaptiveMaxIntervalMilliseconds">自适应退避上限毫秒数。</param>
+        /// <param name="adaptiveInitialIntervalMilliseconds">自适应退避起始间隔毫秒数。</param>
         /// <param name="flowControlStrategyKey">流控策略键。</param>
         /// <param name="timeProvider">时间提供器。</param>
         /// <param name="strategyResolver">策略解析器。</param>
@@ -1704,6 +1706,7 @@ public sealed class LumaEngine<TState>
             IReadOnlyList<int>? adaptiveBackoffStatusCodes,
             int adaptiveBackoffMaxHits,
             int adaptiveMaxIntervalMilliseconds,
+            int adaptiveInitialIntervalMilliseconds,
             string? flowControlStrategyKey,
             TimeProvider timeProvider,
             Func<string?, INodeRequestFlowControlStrategy> strategyResolver)
@@ -1720,7 +1723,8 @@ public sealed class LumaEngine<TState>
                 adaptiveBackoffEnabled,
                 adaptiveBackoffStatusCodes,
                 adaptiveBackoffMaxHits,
-                adaptiveMaxIntervalMilliseconds));
+                adaptiveMaxIntervalMilliseconds,
+                adaptiveInitialIntervalMilliseconds));
         }
 
         /// <summary>
@@ -1732,6 +1736,7 @@ public sealed class LumaEngine<TState>
         /// <param name="adaptiveBackoffStatusCodes">触发自适应退避的状态码集合。</param>
         /// <param name="adaptiveBackoffMaxHits">自适应退避命中次数上限。</param>
         /// <param name="adaptiveMaxIntervalMilliseconds">自适应退避上限毫秒数。</param>
+        /// <param name="adaptiveInitialIntervalMilliseconds">自适应退避起始间隔毫秒数。</param>
         /// <param name="flowControlStrategyKey">流控策略键。</param>
         public void Update(
             string scopeName,
@@ -1740,6 +1745,7 @@ public sealed class LumaEngine<TState>
             IReadOnlyList<int>? adaptiveBackoffStatusCodes,
             int adaptiveBackoffMaxHits,
             int adaptiveMaxIntervalMilliseconds,
+            int adaptiveInitialIntervalMilliseconds,
             string? flowControlStrategyKey)
         {
             lock (_syncRoot)
@@ -1757,7 +1763,8 @@ public sealed class LumaEngine<TState>
                     adaptiveBackoffEnabled,
                     adaptiveBackoffStatusCodes,
                     adaptiveBackoffMaxHits,
-                    adaptiveMaxIntervalMilliseconds));
+                    adaptiveMaxIntervalMilliseconds,
+                    adaptiveInitialIntervalMilliseconds));
             }
         }
 

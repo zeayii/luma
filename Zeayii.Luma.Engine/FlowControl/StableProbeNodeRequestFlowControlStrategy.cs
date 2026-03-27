@@ -62,6 +62,11 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
     private int _configuredMinIntervalMilliseconds;
 
     /// <summary>
+    ///     自适应退避起始间隔（毫秒）；0 表示使用历史兼容模式。
+    /// </summary>
+    private int _adaptiveInitialIntervalMilliseconds;
+
+    /// <summary>
     ///     冷却期截止 UTC 毫秒时间戳。
     /// </summary>
     private long _cooldownUntilUtcMilliseconds;
@@ -84,6 +89,7 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
         _adaptiveBackoffStatusCodes = options.BuildAdaptiveBackoffStatusCodeSet();
         _adaptiveBackoffMaxHits = options.ResolveAdaptiveBackoffMaxHits();
         _adaptiveMaxIntervalMilliseconds = Math.Max(0, options.AdaptiveMaxIntervalMilliseconds);
+        _adaptiveInitialIntervalMilliseconds = options.ResolveAdaptiveInitialIntervalMilliseconds();
 
         if (_adaptiveMinIntervalMilliseconds < _configuredMinIntervalMilliseconds)
         {
@@ -136,10 +142,23 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
             return;
         }
 
-        var baseline = Math.Max(1, ResolveEffectiveMinIntervalMilliseconds());
-        var next = ResolveSafeDouble(baseline);
         var adaptiveCap = ResolveAdaptiveMaxIntervalMilliseconds();
-        _adaptiveMinIntervalMilliseconds = Math.Min(adaptiveCap, next);
+        if (_adaptiveInitialIntervalMilliseconds > 0)
+        {
+            var configuredFloor = Math.Max(1, _configuredMinIntervalMilliseconds);
+            var initial = Math.Max(configuredFloor, _adaptiveInitialIntervalMilliseconds);
+            var multiplierPower = Math.Max(0, _adaptiveBackoffHitCount);
+            var next = ResolveSafePow2Multiply(initial, multiplierPower);
+            _adaptiveMinIntervalMilliseconds = Math.Min(adaptiveCap, next);
+        }
+        else
+        {
+            // 兼容历史行为：在当前有效间隔基础上 x2。
+            var baseline = Math.Max(1, ResolveEffectiveMinIntervalMilliseconds());
+            var next = ResolveSafeDouble(baseline);
+            _adaptiveMinIntervalMilliseconds = Math.Min(adaptiveCap, next);
+        }
+
         _adaptiveBackoffHitCount += 1;
         _probeWindowSuccessCount = 0;
         _cooldownUntilUtcMilliseconds = nowUtcMilliseconds + CooldownMilliseconds;
@@ -212,5 +231,22 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
     private static int ResolveSafeDouble(int value)
     {
         return value > int.MaxValue / 2 ? int.MaxValue : value * 2;
+    }
+
+    /// <summary>
+    ///     安全执行 value * 2^power，避免整数溢出。
+    /// </summary>
+    /// <param name="value">底数。</param>
+    /// <param name="power">指数幂（>=0）。</param>
+    /// <returns>放大后的安全值。</returns>
+    private static int ResolveSafePow2Multiply(int value, int power)
+    {
+        var result = Math.Max(1, value);
+        for (var index = 0; index < power; index++)
+        {
+            result = ResolveSafeDouble(result);
+        }
+
+        return result;
     }
 }

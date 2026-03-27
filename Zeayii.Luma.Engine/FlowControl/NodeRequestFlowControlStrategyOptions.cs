@@ -14,13 +14,15 @@ namespace Zeayii.Luma.Engine.FlowControl;
 /// <param name="AdaptiveBackoffStatusCodes">触发退避的状态码集合。</param>
 /// <param name="AdaptiveBackoffMaxHits">退避命中次数上限；0 表示不限制。</param>
 /// <param name="AdaptiveMaxIntervalMilliseconds">退避间隔上限（毫秒）；0 表示使用策略默认上限。</param>
+/// <param name="AdaptiveInitialIntervalMilliseconds">退避起始间隔（毫秒）；0 表示使用策略默认起始方式。</param>
 public readonly record struct NodeRequestFlowControlStrategyOptions(
     string ScopeName,
     int MinIntervalMilliseconds,
     bool AdaptiveBackoffEnabled,
     IReadOnlyList<int>? AdaptiveBackoffStatusCodes,
     int AdaptiveBackoffMaxHits,
-    int AdaptiveMaxIntervalMilliseconds)
+    int AdaptiveMaxIntervalMilliseconds,
+    int AdaptiveInitialIntervalMilliseconds = 0)
 {
     /// <summary>
     ///     获取已规范化的最小请求间隔（毫秒）。
@@ -38,6 +40,15 @@ public readonly record struct NodeRequestFlowControlStrategyOptions(
     public int ResolveAdaptiveBackoffMaxHits()
     {
         return Math.Max(0, AdaptiveBackoffMaxHits);
+    }
+
+    /// <summary>
+    ///     获取已规范化的退避起始间隔（毫秒）。
+    /// </summary>
+    /// <returns>非负起始间隔；0 表示使用策略默认起始方式。</returns>
+    public int ResolveAdaptiveInitialIntervalMilliseconds()
+    {
+        return Math.Max(0, AdaptiveInitialIntervalMilliseconds);
     }
 
     /// <summary>

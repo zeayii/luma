@@ -102,6 +102,37 @@ public sealed class StableProbeNodeRequestFlowControlStrategyTests
     }
 
     /// <summary>
+    ///     验证配置起始退避后采用 2 倍指数增长，并受上限钳制。
+    /// </summary>
+    [Fact]
+    public void ObserveResponseShouldUseConfiguredInitialBackoffAndCap()
+    {
+        var strategy = new StableProbeNodeRequestFlowControlStrategy();
+        strategy.Update(new NodeRequestFlowControlStrategyOptions(
+            "test.scope",
+            10,
+            true,
+            [429],
+            0,
+            30_000,
+            1_000));
+
+        strategy.ObserveResponse(HttpStatusCode.TooManyRequests, 0);
+        Assert.Equal(1_000, strategy.ResolveEffectiveMinIntervalMilliseconds());
+
+        strategy.ObserveResponse(HttpStatusCode.TooManyRequests, 1);
+        Assert.Equal(2_000, strategy.ResolveEffectiveMinIntervalMilliseconds());
+
+        strategy.ObserveResponse(HttpStatusCode.TooManyRequests, 2);
+        Assert.Equal(4_000, strategy.ResolveEffectiveMinIntervalMilliseconds());
+
+        strategy.ObserveResponse(HttpStatusCode.TooManyRequests, 3);
+        strategy.ObserveResponse(HttpStatusCode.TooManyRequests, 4);
+        strategy.ObserveResponse(HttpStatusCode.TooManyRequests, 5);
+        Assert.Equal(30_000, strategy.ResolveEffectiveMinIntervalMilliseconds());
+    }
+
+    /// <summary>
     ///     验证注册表支持挂载自定义策略并可按键解析。
     /// </summary>
     [Fact]

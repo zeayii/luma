@@ -12,6 +12,7 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// <param name="AdaptiveBackoffStatusCodes">触发自适应退避的 HTTP 状态码集合；为空表示不触发。</param>
 /// <param name="AdaptiveBackoffMaxHits">自适应退避命中次数上限；小于等于 0 表示不限制命中次数。</param>
 /// <param name="AdaptiveMaxIntervalMilliseconds">自适应退避上限毫秒数；小于等于 0 表示按默认上限处理。</param>
+/// <param name="AdaptiveInitialIntervalMilliseconds">自适应退避起始间隔毫秒数；小于等于 0 表示沿用策略默认起点。</param>
 /// <param name="FlowControlStrategyKey">流控策略键；为空时回退默认策略。</param>
 public readonly record struct NodeFlowControlOptions(
     string ScopeName,
@@ -20,10 +21,11 @@ public readonly record struct NodeFlowControlOptions(
     IReadOnlyList<int>? AdaptiveBackoffStatusCodes,
     int AdaptiveBackoffMaxHits,
     int AdaptiveMaxIntervalMilliseconds,
+    int AdaptiveInitialIntervalMilliseconds = 0,
     string? FlowControlStrategyKey = "stable-probe")
 {
     /// <summary>
     ///     不启用流控的默认配置。
     /// </summary>
-    public static NodeFlowControlOptions Disabled { get; } = new("default", 0, false, null, 0, 0);
+    public static NodeFlowControlOptions Disabled { get; } = new("default", 0, false, null, 0, 0, 0);
 }
