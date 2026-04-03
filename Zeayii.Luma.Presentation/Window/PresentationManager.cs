@@ -192,8 +192,7 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
         headerGrid.AddColumn(new GridColumn().RightAligned());
         headerGrid.AddRow(
             new Markup($"[grey]Command:[/] [green]{Markup.Escape(progressSnapshot.CommandName)}[/]  [grey]Run:[/] [green]{Markup.Escape(progressSnapshot.RunName)}[/]"),
-            new Markup(
-                $@"[grey]Stored:[/] [blue]{progressSnapshot.StoredItemCount}[/]  [grey]Active:[/] [blue]{progressSnapshot.ActiveRequestCount}[/]  [grey]Queued:[/] [blue]{progressSnapshot.QueuedRequestCount}[/]  [grey]Elapsed:[/] [blue]{progressSnapshot.Elapsed:hh\:mm\:ss}[/]")
+            new Markup($@"[grey]Stored:[/] [blue]{progressSnapshot.StoredItemCount}[/]  [grey]Active:[/] [blue]{progressSnapshot.ActiveRequestCount}[/]  [grey]Queued:[/] [blue]{progressSnapshot.QueuedRequestCount}[/]  [grey]Elapsed:[/] [blue]{FormatElapsed(progressSnapshot.Elapsed)}[/]")
         );
 
         var header = new Panel(headerGrid)
@@ -478,5 +477,16 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
             LogLevelKind.Critical => "bold red",
             _ => "white"
         };
+    }
+
+    /// <summary>
+    ///     将耗时格式化为“总小时:分钟:秒”，例如 49:13:07。
+    /// </summary>
+    /// <param name="elapsed">运行耗时。</param>
+    /// <returns>格式化后的耗时字符串。</returns>
+    private static string FormatElapsed(TimeSpan elapsed)
+    {
+        var totalHours = Math.Max(0, (int)elapsed.TotalHours);
+        return $"{totalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}";
     }
 }
