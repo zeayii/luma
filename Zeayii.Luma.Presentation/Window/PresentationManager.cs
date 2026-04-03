@@ -15,9 +15,9 @@ namespace Zeayii.Luma.Presentation.Window;
 public sealed class PresentationManager(PresentationOptions options, ILogManager logManager, IProgressManager progressManager) : IPresentationManager
 {
     /// <summary>
-    ///     节点区域固定宽度（字符列）。
+    ///     左侧节点区域比例（4:6）。
     /// </summary>
-    private const int NodesPanelFixedWidth = 92;
+    private const double NodesPanelRatio = 0.4d;
 
     /// <summary>
     ///     日志区域最小宽度（字符列）。
@@ -30,6 +30,25 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     private const int NodesPanelMinimumWidth = 28;
 
     /// <summary>
+    ///     底部按键说明区域高度。
+    /// </summary>
+    private const int FooterPanelRows = 3;
+
+    /// <summary>
+    ///     头部区域高度。
+    /// </summary>
+    private const int HeaderPanelRows = 3;
+
+    /// <summary>
+    ///     主面板焦点区域。
+    /// </summary>
+    private enum MainFocusRegion : byte
+    {
+        Nodes = 0,
+        Logs = 1
+    }
+
+    /// <summary>
     ///     启动标记。
     /// </summary>
     private bool _isStarted;
@@ -38,6 +57,11 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     ///     窗口生命周期取消源。
     /// </summary>
     private CancellationTokenSource? _lifecycleCancellationTokenSource;
+
+    /// <summary>
+    ///     当前焦点区域。
+    /// </summary>
+    private MainFocusRegion _focusedRegion = MainFocusRegion.Nodes;
 
     /// <summary>
     ///     右侧日志滚动偏移。
@@ -53,6 +77,11 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     ///     停止请求标记。
     /// </summary>
     private int _stopRequested;
+
+    /// <summary>
+    ///     退出确认挂起标记（Q 后等待 Enter）。
+    /// </summary>
+    private bool _pendingExitConfirm;
 
     /// <inheritdoc />
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -180,16 +209,29 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
         var leftPanel = new Panel(new Rows(visibleNodes.Select(static IRenderable (line) => new Markup(line)).ToArray())) { Border = BoxBorder.Rounded, Header = new PanelHeader(" Nodes "), Expand = true };
         var rightPanel = new Panel(new Rows(visibleLogs.Select(static IRenderable (line) => new Markup(line)).ToArray())) { Border = BoxBorder.Rounded, Header = new PanelHeader(" Logs "), Expand = true };
 
+        if (_focusedRegion == MainFocusRegion.Nodes)
+        {
+            leftPanel.BorderStyle = new Style(Color.Aqua);
+            leftPanel.Header = new PanelHeader(" Nodes * ");
+        }
+        else
+        {
+            rightPanel.BorderStyle = new Style(Color.Aqua);
+            rightPanel.Header = new PanelHeader(" Logs * ");
+        }
+
         var terminalWidth = AnsiConsole.Profile.Width;
+        var rawNodesWidth = (int)Math.Round(terminalWidth * NodesPanelRatio, MidpointRounding.AwayFromZero);
         var maxNodesWidth = Math.Max(NodesPanelMinimumWidth, terminalWidth - LogsPanelMinimumWidth);
-        var effectiveNodesWidth = Math.Min(NodesPanelFixedWidth, maxNodesWidth);
+        var effectiveNodesWidth = Math.Clamp(rawNodesWidth, NodesPanelMinimumWidth, maxNodesWidth);
 
         var layout = new Layout("Root");
-        layout.SplitRows(new Layout("Header") { Size = 3 }, new Layout("Body"));
+        layout.SplitRows(new Layout("Header") { Size = HeaderPanelRows }, new Layout("Body"), new Layout("Footer") { Size = FooterPanelRows });
         layout["Body"].SplitColumns(new Layout("Nodes") { Size = effectiveNodesWidth }, new Layout("Logs"));
         layout["Header"].Update(header);
         layout["Nodes"].Update(leftPanel);
         layout["Logs"].Update(rightPanel);
+        layout["Footer"].Update(RenderInstructionFooter());
         return layout;
     }
 
@@ -250,11 +292,36 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     /// <returns>可显示行数。</returns>
     private static int ResolveBodyVisibleLineCount()
     {
-        const int headerRows = 3;
+        const int headerRows = HeaderPanelRows;
+        const int footerRows = FooterPanelRows;
         const int panelBorderRows = 2;
         var terminalHeight = Math.Max(1, AnsiConsole.Profile.Height);
-        var bodyRows = Math.Max(1, terminalHeight - headerRows);
+        var bodyRows = Math.Max(1, terminalHeight - headerRows - footerRows);
         return Math.Max(1, bodyRows - panelBorderRows);
+    }
+
+    /// <summary>
+    ///     渲染底部快捷键说明。
+    /// </summary>
+    /// <returns>可渲染对象。</returns>
+    private IRenderable RenderInstructionFooter()
+    {
+        var regionText = _focusedRegion == MainFocusRegion.Nodes ? "Nodes" : "Logs";
+        var quitText = _pendingExitConfirm ? "[red]Confirm Quit:[/] [yellow]Enter[/]" : "[red]Quit:[/] [yellow]Q + Enter[/]";
+        var text =
+            $"[grey]Focus:[/] [deepskyblue1]{Markup.Escape(regionText)}[/]   " +
+            $"[grey]Switch:[/] [yellow]Tab[/]   " +
+            $"[grey]Scroll:[/] [yellow]Up/Down[/]   " +
+            $"[grey]Page:[/] [yellow]PgUp/PgDn[/]   " +
+            $"[grey]Jump:[/] [yellow]Home/End[/]   " +
+            quitText;
+
+        return new Panel(Align.Center(new Markup(text), VerticalAlignment.Middle))
+        {
+            Border = BoxBorder.Rounded,
+            Header = new PanelHeader(" Keys "),
+            Expand = true
+        };
     }
 
     /// <summary>
@@ -265,62 +332,118 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
         while (Console.KeyAvailable)
         {
             var key = Console.ReadKey(true);
-            if (key.Modifiers.HasFlag(ConsoleModifiers.Alt))
-            {
-                switch (key.Key)
-                {
-                    case ConsoleKey.UpArrow:
-                        {
-                            _logOffset++;
-                            break;
-                        }
-                    case ConsoleKey.DownArrow:
-                        {
-                            _logOffset = Math.Max(0, _logOffset - 1);
-                            break;
-                        }
-                    case ConsoleKey.PageUp:
-                        {
-                            _logOffset += 10;
-                            break;
-                        }
-                    case ConsoleKey.PageDown:
-                        {
-                            _logOffset = Math.Max(0, _logOffset - 10);
-                            break;
-                        }
-                }
-
-                continue;
-            }
-
             switch (key.Key)
             {
+                case ConsoleKey.Tab:
+                {
+                    _pendingExitConfirm = false;
+                    _focusedRegion = _focusedRegion == MainFocusRegion.Nodes ? MainFocusRegion.Logs : MainFocusRegion.Nodes;
+                    break;
+                }
                 case ConsoleKey.UpArrow:
+                {
+                    _pendingExitConfirm = false;
+                    if (_focusedRegion == MainFocusRegion.Nodes)
                     {
                         _nodeOffset++;
-                        break;
                     }
+                    else
+                    {
+                        _logOffset++;
+                    }
+
+                    break;
+                }
                 case ConsoleKey.DownArrow:
+                {
+                    _pendingExitConfirm = false;
+                    if (_focusedRegion == MainFocusRegion.Nodes)
                     {
                         _nodeOffset = Math.Max(0, _nodeOffset - 1);
-                        break;
                     }
+                    else
+                    {
+                        _logOffset = Math.Max(0, _logOffset - 1);
+                    }
+
+                    break;
+                }
                 case ConsoleKey.PageUp:
+                {
+                    _pendingExitConfirm = false;
+                    if (_focusedRegion == MainFocusRegion.Nodes)
                     {
                         _nodeOffset += 10;
-                        break;
                     }
+                    else
+                    {
+                        _logOffset += 10;
+                    }
+
+                    break;
+                }
                 case ConsoleKey.PageDown:
+                {
+                    _pendingExitConfirm = false;
+                    if (_focusedRegion == MainFocusRegion.Nodes)
                     {
                         _nodeOffset = Math.Max(0, _nodeOffset - 10);
-                        break;
                     }
-                case ConsoleKey.Q:
+                    else
                     {
-                        Interlocked.Exchange(ref _stopRequested, 1);
-                        break;
+                        _logOffset = Math.Max(0, _logOffset - 10);
                     }
+
+                    break;
+                }
+                case ConsoleKey.Home:
+                {
+                    _pendingExitConfirm = false;
+                    if (_focusedRegion == MainFocusRegion.Nodes)
+                    {
+                        _nodeOffset = int.MaxValue;
+                    }
+                    else
+                    {
+                        _logOffset = int.MaxValue;
+                    }
+
+                    break;
+                }
+                case ConsoleKey.End:
+                {
+                    _pendingExitConfirm = false;
+                    if (_focusedRegion == MainFocusRegion.Nodes)
+                    {
+                        _nodeOffset = 0;
+                    }
+                    else
+                    {
+                        _logOffset = 0;
+                    }
+
+                    break;
+                }
+                case ConsoleKey.Q:
+                {
+                    _pendingExitConfirm = true;
+                    break;
+                }
+                case ConsoleKey.Enter:
+                {
+                    if (_pendingExitConfirm)
+                    {
+                        _pendingExitConfirm = false;
+                        Interlocked.Exchange(ref _stopRequested, 1);
+                    }
+
+                    break;
+                }
+                default:
+                {
+                    _pendingExitConfirm = false;
+                    break;
+                }
             }
         }
     }
