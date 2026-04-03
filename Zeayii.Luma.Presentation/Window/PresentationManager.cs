@@ -257,8 +257,7 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
             .Select(static node =>
             {
                 var reasonText = string.IsNullOrWhiteSpace(node.Reason) ? string.Empty : $" [darkorange]Reason={Markup.Escape(node.Reason)}[/]";
-                return
-                    $"{new string(' ', node.Depth * 2)}[{ResolveNodeColor(node.Status)}]{Markup.Escape(node.DisplayText)}[/] [grey](Stored={node.StoredCount}, Exists={node.AlreadyExistsCount}, Queued={node.QueuedRequestCount}, Active={node.ActiveRequestCount})[/]{reasonText}";
+                return $"{new string(' ', node.Depth * 2)}[{ResolveNodeColor(node.Status)}]{Markup.Escape(node.DisplayText)}[/] [grey](Stored={node.StoredCount}, Exists={node.AlreadyExistsCount}, Queued={node.QueuedRequestCount}, Active={node.ActiveRequestCount})[/]{reasonText}";
             })
             .ToArray();
     }
