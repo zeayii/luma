@@ -281,7 +281,11 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
         return logEntries
             .Skip(start)
             .Take(visibleLineCount)
-            .Select(static entry => $"[{PresentationPalette.Muted}]{entry.Timestamp:HH:mm:ss}[/] [{ResolveLogColor(entry.Level)}]{Markup.Escape(entry.Tag)}[/] {Markup.Escape(entry.Message)}")
+            .Select(static entry =>
+            {
+                var localTimestamp = entry.Timestamp.ToLocalTime();
+                return $"[{PresentationPalette.Muted}]{localTimestamp:HH:mm:ss}[/] [{ResolveLogColor(entry.Level)}]{Markup.Escape(entry.Tag)}[/] {Markup.Escape(entry.Message)}";
+            })
             .ToArray();
     }
 
