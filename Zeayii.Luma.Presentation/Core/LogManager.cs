@@ -6,6 +6,7 @@ using Spectre.Console;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
 using Zeayii.Luma.Presentation.Configuration;
+using Zeayii.Luma.Presentation.Support;
 
 namespace Zeayii.Luma.Presentation.Core;
 
@@ -187,17 +188,17 @@ public sealed class LogManager : ILogManager, IDisposable
     {
         var color = entry.Level switch
         {
-            LogLevelKind.Trace => Color.Grey,
-            LogLevelKind.Debug => Color.SteelBlue1,
-            LogLevelKind.Information => Color.White,
-            LogLevelKind.Warning => Color.Yellow,
-            LogLevelKind.Error => Color.Red1,
-            LogLevelKind.Critical => Color.Red,
-            _ => Color.White
+            LogLevelKind.Trace => PresentationPalette.Muted,
+            LogLevelKind.Debug => PresentationPalette.Accent,
+            LogLevelKind.Information => PresentationPalette.Info,
+            LogLevelKind.Warning => PresentationPalette.Warning,
+            LogLevelKind.Error => PresentationPalette.Failure,
+            LogLevelKind.Critical => PresentationPalette.Failure,
+            _ => PresentationPalette.Info
         };
 
         var timestamp = entry.Timestamp.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
-        AnsiConsole.MarkupLine($"[grey]{timestamp}[/] [bold {color}][[{Markup.Escape(entry.Tag)}]][/] {Markup.Escape(entry.Message)}");
+        AnsiConsole.MarkupLine($"[{PresentationPalette.Muted}]{timestamp}[/] [{color}][[{Markup.Escape(entry.Tag)}]][/] {Markup.Escape(entry.Message)}");
     }
 
     /// <summary>

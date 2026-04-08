@@ -3,6 +3,7 @@ using Spectre.Console.Rendering;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
 using Zeayii.Luma.Presentation.Configuration;
+using Zeayii.Luma.Presentation.Support;
 
 namespace Zeayii.Luma.Presentation.Window;
 
@@ -191,8 +192,8 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
         headerGrid.AddColumn();
         headerGrid.AddColumn(new GridColumn().RightAligned());
         headerGrid.AddRow(
-            new Markup($"[grey]Command:[/] [green]{Markup.Escape(progressSnapshot.CommandName)}[/]  [grey]Run:[/] [green]{Markup.Escape(progressSnapshot.RunName)}[/]"),
-            new Markup($@"[grey]Stored:[/] [blue]{progressSnapshot.StoredItemCount}[/]  [grey]Active:[/] [blue]{progressSnapshot.ActiveRequestCount}[/]  [grey]Queued:[/] [blue]{progressSnapshot.QueuedRequestCount}[/]  [grey]Elapsed:[/] [blue]{FormatElapsed(progressSnapshot.Elapsed)}[/]")
+            new Markup($"[{PresentationPalette.Muted}]Command:[/] [{PresentationPalette.Success}]{Markup.Escape(progressSnapshot.CommandName)}[/]  [{PresentationPalette.Muted}]Run:[/] [{PresentationPalette.Success}]{Markup.Escape(progressSnapshot.RunName)}[/]"),
+            new Markup($@"[{PresentationPalette.Muted}]Stored:[/] [{PresentationPalette.Accent}]{progressSnapshot.StoredItemCount}[/]  [{PresentationPalette.Muted}]Active:[/] [{PresentationPalette.Accent}]{progressSnapshot.ActiveRequestCount}[/]  [{PresentationPalette.Muted}]Queued:[/] [{PresentationPalette.Accent}]{progressSnapshot.QueuedRequestCount}[/]  [{PresentationPalette.Muted}]Elapsed:[/] [{PresentationPalette.Accent}]{FormatElapsed(progressSnapshot.Elapsed)}[/]")
         );
 
         var header = new Panel(headerGrid)
@@ -210,12 +211,12 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
 
         if (_focusedRegion == MainFocusRegion.Nodes)
         {
-            leftPanel.BorderStyle = new Style(Color.Aqua);
+            leftPanel.BorderStyle = new Style(PresentationPalette.Focus);
             leftPanel.Header = new PanelHeader(" Nodes * ");
         }
         else
         {
-            rightPanel.BorderStyle = new Style(Color.Aqua);
+            rightPanel.BorderStyle = new Style(PresentationPalette.Focus);
             rightPanel.Header = new PanelHeader(" Logs * ");
         }
 
@@ -243,7 +244,7 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     {
         if (nodes.Count == 0)
         {
-            return ["[grey]No nodes[/]"];
+            return [$"[{PresentationPalette.Muted}]No nodes[/]"];
         }
 
         var visibleLineCount = ResolveBodyVisibleLineCount();
@@ -255,8 +256,8 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
             .Take(visibleLineCount)
             .Select(static node =>
             {
-                var reasonText = string.IsNullOrWhiteSpace(node.Reason) ? string.Empty : $" [darkorange]Reason={Markup.Escape(node.Reason)}[/]";
-                return $"{new string(' ', node.Depth * 2)}[{ResolveNodeColor(node.Status)}]{Markup.Escape(node.DisplayText)}[/] [grey](Stored={node.StoredCount}, Exists={node.AlreadyExistsCount}, Queued={node.QueuedRequestCount}, Active={node.ActiveRequestCount})[/]{reasonText}";
+                var reasonText = string.IsNullOrWhiteSpace(node.Reason) ? string.Empty : $" [{PresentationPalette.Reason}]Reason={Markup.Escape(node.Reason)}[/]";
+                return $"{new string(' ', node.Depth * 2)}[{ResolveNodeColor(node.Status)}]{Markup.Escape(node.DisplayText)}[/] [{PresentationPalette.Muted}](Stored={node.StoredCount}, Exists={node.AlreadyExistsCount}, Queued={node.QueuedRequestCount}, Active={node.ActiveRequestCount})[/]{reasonText}";
             })
             .ToArray();
     }
@@ -270,7 +271,7 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     {
         if (logEntries.Count == 0)
         {
-            return ["[grey]No logs[/]"];
+            return [$"[{PresentationPalette.Muted}]No logs[/]"];
         }
 
         var visibleLineCount = ResolveBodyVisibleLineCount();
@@ -280,7 +281,7 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
         return logEntries
             .Skip(start)
             .Take(visibleLineCount)
-            .Select(static entry => $"[grey]{entry.Timestamp:HH:mm:ss}[/] [{ResolveLogColor(entry.Level)}]{Markup.Escape(entry.Tag)}[/] {Markup.Escape(entry.Message)}")
+            .Select(static entry => $"[{PresentationPalette.Muted}]{entry.Timestamp:HH:mm:ss}[/] [{ResolveLogColor(entry.Level)}]{Markup.Escape(entry.Tag)}[/] {Markup.Escape(entry.Message)}")
             .ToArray();
     }
 
@@ -305,13 +306,13 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     private IRenderable RenderInstructionFooter()
     {
         var regionText = _focusedRegion == MainFocusRegion.Nodes ? "Nodes" : "Logs";
-        var quitText = _pendingExitConfirm ? "[red]Confirm Quit:[/] [yellow]Enter[/]" : "[red]Quit:[/] [yellow]Q + Enter[/]";
+        var quitText = _pendingExitConfirm ? $"[{PresentationPalette.Failure}]Confirm Quit:[/] [{PresentationPalette.Warning}]Enter[/]" : $"[{PresentationPalette.Failure}]Quit:[/] [{PresentationPalette.Warning}]Q + Enter[/]";
         var text =
-            $"[grey]Focus:[/] [deepskyblue1]{Markup.Escape(regionText)}[/]   " +
-            $"[grey]Switch:[/] [yellow]Tab[/]   " +
-            $"[grey]Scroll:[/] [yellow]Up/Down[/]   " +
-            $"[grey]Page:[/] [yellow]PgUp/PgDn[/]   " +
-            $"[grey]Jump:[/] [yellow]Home/End[/]   " +
+            $"[{PresentationPalette.Muted}]Focus:[/] [{PresentationPalette.Accent}]{Markup.Escape(regionText)}[/]   " +
+            $"[{PresentationPalette.Muted}]Switch:[/] [{PresentationPalette.Warning}]Tab[/]   " +
+            $"[{PresentationPalette.Muted}]Scroll:[/] [{PresentationPalette.Warning}]Up/Down[/]   " +
+            $"[{PresentationPalette.Muted}]Page:[/] [{PresentationPalette.Warning}]PgUp/PgDn[/]   " +
+            $"[{PresentationPalette.Muted}]Jump:[/] [{PresentationPalette.Warning}]Home/End[/]   " +
             quitText;
 
         return new Panel(Align.Center(new Markup(text), VerticalAlignment.Middle))
@@ -449,33 +450,33 @@ public sealed class PresentationManager(PresentationOptions options, ILogManager
     /// <summary>
     ///     将节点状态映射为颜色。
     /// </summary>
-    private static string ResolveNodeColor(NodeExecutionStatus status)
+    private static Color ResolveNodeColor(NodeExecutionStatus status)
     {
         return status switch
         {
-            NodeExecutionStatus.Running => "green",
-            NodeExecutionStatus.Completed => "blue",
-            NodeExecutionStatus.Cancelled => "yellow",
-            NodeExecutionStatus.Failed => "red",
-            NodeExecutionStatus.Stopping => "orange1",
-            _ => "white"
+            NodeExecutionStatus.Running => PresentationPalette.Success,
+            NodeExecutionStatus.Completed => PresentationPalette.Accent,
+            NodeExecutionStatus.Cancelled => PresentationPalette.Warning,
+            NodeExecutionStatus.Failed => PresentationPalette.Failure,
+            NodeExecutionStatus.Stopping => Color.Orange1,
+            _ => PresentationPalette.Info
         };
     }
 
     /// <summary>
     ///     将日志等级映射为颜色。
     /// </summary>
-    private static string ResolveLogColor(LogLevelKind level)
+    private static Color ResolveLogColor(LogLevelKind level)
     {
         return level switch
         {
-            LogLevelKind.Trace => "grey",
-            LogLevelKind.Debug => "deepskyblue1",
-            LogLevelKind.Information => "white",
-            LogLevelKind.Warning => "yellow",
-            LogLevelKind.Error => "red",
-            LogLevelKind.Critical => "bold red",
-            _ => "white"
+            LogLevelKind.Trace => PresentationPalette.Muted,
+            LogLevelKind.Debug => PresentationPalette.Accent,
+            LogLevelKind.Information => PresentationPalette.Info,
+            LogLevelKind.Warning => PresentationPalette.Warning,
+            LogLevelKind.Error => PresentationPalette.Failure,
+            LogLevelKind.Critical => PresentationPalette.Failure,
+            _ => PresentationPalette.Info
         };
     }
 
