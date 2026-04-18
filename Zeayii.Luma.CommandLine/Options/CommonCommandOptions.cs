@@ -12,6 +12,17 @@ namespace Zeayii.Luma.CommandLine.Options;
 internal sealed class CommonCommandOptions
 {
     /// <summary>
+    ///     通用参数模块。
+    /// </summary>
+    public required CommonCommandOptionSet Common { get; init; }
+}
+
+/// <summary>
+///     通用参数模块。
+/// </summary>
+internal sealed class CommonCommandOptionSet
+{
+    /// <summary>
     ///     运行名称参数。
     /// </summary>
     public required Option<string?> RunNameOption { get; init; }
