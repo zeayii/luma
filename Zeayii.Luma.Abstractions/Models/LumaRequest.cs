@@ -17,6 +17,7 @@ public sealed class LumaRequest
     {
         HttpRequestMessage = httpRequestMessage ?? throw new ArgumentNullException(nameof(httpRequestMessage));
         NodePath = string.IsNullOrWhiteSpace(nodePath) ? throw new ArgumentNullException(nameof(nodePath)) : nodePath;
+        StageKey = "default";
         RouteKind = LumaRouteKind.Auto;
     }
 
@@ -29,6 +30,11 @@ public sealed class LumaRequest
     ///     所属节点路径。
     /// </summary>
     public string NodePath { get; }
+
+    /// <summary>
+    ///     所属阶段键。
+    /// </summary>
+    public string StageKey { get; init; }
 
     /// <summary>
     ///     路由类型。

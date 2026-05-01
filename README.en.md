@@ -9,7 +9,7 @@ Zeayii.Luma is a Node-driven crawling runtime framework for private provider int
 1. Users implement Nodes, not schedulers.
 2. `ISpider<TState>` creates run state and provides the root node.
 3. The framework owns request execution, concurrency, backpressure, persistence, and observability.
-4. Nodes declare traversal and child-concurrency preferences through options.
+4. Nodes declare child expansion concurrency, same-type request concurrency, and flow control through execution profiles.
 5. Persistence execution is centralized in Engine; nodes only filter and receive callbacks.
 
 ## 2. Module Responsibilities
@@ -39,10 +39,19 @@ Zeayii.Luma is a Node-driven crawling runtime framework for private provider int
 - `ShouldPersistAsync`
 - `OnPersistedAsync`
 3. `NodeDispatchBatch`: stage output container (`Requests` / `Children` / `Items` / stop signal).
-4. `NodeExecutionOptions`:
+4. `NodeExecutionProfile`: unified container of `ExecutionOptions` and `FlowControlOptions`.
+5. `NodeStageExecutionOptions`:
+- `StageKey`
+- `RequestCapacity` / `DownloadCapacity`
+- `RequestConcurrency` / `DownloadConcurrency`
+- `RequestBackpressureMode` / `DownloadBackpressureMode`
+- `MinRequestIntervalMilliseconds`
+- `RiskControlInitialDelayMilliseconds` / `RiskControlMaxDelayMilliseconds` / `RiskControlMaxRetries`
+6. `NodeExecutionOptions`:
 - `ChildMaxConcurrency`
-5. `LumaContext<TState>`: runtime metadata + resource capability functions (for example HTML parsing and Cookie operations).
-6. `NodeExecutionOptions` also includes `DefaultRouteKind` for default node route behavior.
+- `NodeTypeMaxConcurrency`
+- `DefaultRouteKind`
+7. `LumaContext<TState>`: runtime metadata + resource capability functions (for example HTML parsing and Cookie operations).
 
 ## 4. Runtime Flow
 

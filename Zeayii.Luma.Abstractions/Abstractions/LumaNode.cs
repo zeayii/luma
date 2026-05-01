@@ -83,6 +83,26 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
+    ///     解析节点执行画像。
+    ///     <para>
+    ///         引擎优先基于该画像执行类型级并发与流控治理。
+    ///     </para>
+    /// </summary>
+    /// <param name="context">节点上下文。</param>
+    /// <returns>节点执行画像。</returns>
+    public virtual NodeExecutionProfile ResolveExecutionProfile(LumaContext<TState> context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        context.CancellationToken.ThrowIfCancellationRequested();
+        return new NodeExecutionProfile
+        {
+            StageOptions = NodeStageExecutionOptions.Default,
+            ExecutionOptions = ExecutionOptions,
+            FlowControlOptions = ResolveFlowControlOptions(context)
+        };
+    }
+
+    /// <summary>
     ///     构建初始请求流。
     /// </summary>
     /// <param name="context">节点上下文。</param>

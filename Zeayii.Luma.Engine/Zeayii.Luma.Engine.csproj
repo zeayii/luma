@@ -17,6 +17,7 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5"/>
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5"/>
+        <PackageReference Include="System.Threading.RateLimiting" Version="10.0.0"/>
         <PackageReference Include="Zeayii.Infrastructure.Net.Http" Version="0.0.17" Condition="'$(UseLocalSource)' != 'true'" />
     </ItemGroup>
 
@@ -29,4 +30,3 @@
     </ItemGroup>
 
 </Project>
-

@@ -57,8 +57,9 @@ public sealed class LumaEngineCriticalTests
     [Fact]
     public async Task RunAsyncShouldEnqueueByChildRegistrationOrderForChildren()
     {
-        var childA = new MultiRequestNode("A", "https://example.com/a/1", "https://example.com/a/2");
-        var childB = new MultiRequestNode("B", "https://example.com/b/1");
+        var childASecond = new SingleRequestNode("A-2", "https://example.com/a/2", new TestItem("item-a-2"));
+        var childA = new RequestWithChildrenNode("A", "https://example.com/a/1", new NodeExecutionOptions(LumaRouteKind.Auto, 1), childASecond);
+        var childB = new SingleRequestNode("B", "https://example.com/b/1", new TestItem("item-b-1"));
         var root = new RootWithChildrenNode("root", new NodeExecutionOptions(LumaRouteKind.Auto, 1), childA, childB);
         var fixture = CreateFixture();
 
@@ -76,8 +77,9 @@ public sealed class LumaEngineCriticalTests
     [Fact]
     public async Task RunAsyncShouldCompleteRequestsForAllChildren()
     {
-        var childA = new MultiRequestNode("A", "https://example.com/a/1", "https://example.com/a/2");
-        var childB = new MultiRequestNode("B", "https://example.com/b/1");
+        var childASecond = new SingleRequestNode("A-2", "https://example.com/a/2", new TestItem("item-a-2"));
+        var childA = new RequestWithChildrenNode("A", "https://example.com/a/1", new NodeExecutionOptions(LumaRouteKind.Auto, 1), childASecond);
+        var childB = new SingleRequestNode("B", "https://example.com/b/1", new TestItem("item-b-1"));
         var root = new RootWithChildrenNode("root", new NodeExecutionOptions(LumaRouteKind.Auto, 1), childA, childB);
         var fixture = CreateFixture();
 
@@ -366,6 +368,60 @@ public sealed class LumaEngineCriticalTests
             {
                 yield return new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(requestUrl)), context.NodePath);
             }
+        }
+
+        /// <inheritdoc />
+        public override ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    ///     单请求并携带子节点的树节点。
+    /// </summary>
+    private sealed class RequestWithChildrenNode : LumaNode<TestState>
+    {
+        /// <summary>
+        ///     请求地址。
+        /// </summary>
+        private readonly string _url;
+
+        /// <summary>
+        ///     执行选项。
+        /// </summary>
+        private readonly NodeExecutionOptions _executionOptions;
+
+        /// <summary>
+        ///     子节点集合。
+        /// </summary>
+        private readonly IReadOnlyList<LumaNode<TestState>> _children;
+
+        /// <summary>
+        ///     初始化节点。
+        /// </summary>
+        public RequestWithChildrenNode(string key, string url, NodeExecutionOptions executionOptions, params LumaNode<TestState>[] children) : base(key)
+        {
+            _url = url;
+            _executionOptions = executionOptions;
+            _children = children;
+        }
+
+        /// <inheritdoc />
+        public override NodeExecutionOptions ExecutionOptions => _executionOptions;
+
+        /// <inheritdoc />
+        public override async IAsyncEnumerable<LumaRequest> BuildRequestsAsync(LumaContext<TestState> context)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            foreach (var child in _children)
+            {
+                AddChild(child);
+            }
+
+            await Task.CompletedTask.ConfigureAwait(false);
+            yield return new LumaRequest(new HttpRequestMessage(HttpMethod.Get, new Uri(_url)), context.NodePath);
         }
 
         /// <inheritdoc />

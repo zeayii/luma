@@ -22,15 +22,16 @@ internal static class OptionsBuilder
         return new LumaEngineOptions
         {
             DefaultRouteKind = resolvedDefaultRouteKind,
-            RequestWorkerCount = applicationOptions.DownloadWorkerCount,
+            RequestWorkerCount = applicationOptions.RequestWorkerCount,
             DownloadWorkerCount = applicationOptions.DownloadWorkerCount,
             PersistWorkerCount = applicationOptions.PersistWorkerCount,
             RequestChannelCapacity = applicationOptions.RequestChannelCapacity,
-            DownloadChannelCapacity = applicationOptions.RequestChannelCapacity,
+            DownloadChannelCapacity = applicationOptions.DownloadChannelCapacity,
             PersistChannelCapacity = applicationOptions.PersistChannelCapacity,
             PersistBatchSize = applicationOptions.PersistBatchSize,
             PersistFlushInterval = TimeSpan.FromMilliseconds(applicationOptions.PersistFlushIntervalMilliseconds),
-            PresentationRefreshInterval = TimeSpan.FromMilliseconds(applicationOptions.RefreshIntervalMilliseconds)
+            PresentationRefreshInterval = TimeSpan.FromMilliseconds(applicationOptions.RefreshIntervalMilliseconds),
+            GlobalMinRequestIntervalMilliseconds = applicationOptions.RequestPacingEnabled ? applicationOptions.RequestPacingMinIntervalMilliseconds : 0
         };
     }
 

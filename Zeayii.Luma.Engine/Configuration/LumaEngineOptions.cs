@@ -62,6 +62,14 @@ public sealed class LumaEngineOptions
     public required TimeSpan PresentationRefreshInterval { get; init; }
 
     /// <summary>
+    ///     全局最小请求间隔（毫秒）。
+    ///     <para>
+    ///         小于等于 0 表示不启用全局请求速率限制。
+    ///     </para>
+    /// </summary>
+    public int GlobalMinRequestIntervalMilliseconds { get; init; }
+
+    /// <summary>
     ///     时间提供器。
     ///     <para>
     ///         用于统一引擎内时间读取，便于测试场景注入可控时间源。

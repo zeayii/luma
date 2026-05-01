@@ -50,14 +50,20 @@
 - `Items`
 - `StopNode` / `StopReason`
 
-2. `NodeExecutionOptions`
-- `ChildMaxConcurrency`
+2. `NodeExecutionProfile`
+- `StageOptions`
+- `ExecutionOptions`
+- `FlowControlOptions`
 
-3. `LumaContext<TState>`
+3. `NodeExecutionOptions`
+- `ChildMaxConcurrency`
+- `NodeTypeMaxConcurrency`
+
+4. `LumaContext<TState>`
 - Runtime metadata (RunId, RunName, Path, Depth)
 - Resource capability functions (for example HTML parsing and Cookie operations)
 - `CancellationToken`
-4. `NodeExecutionOptions.DefaultRouteKind`
+5. `NodeExecutionOptions.DefaultRouteKind`
 - Node default route kind.
 - Request and Cookie operations use node default route unless explicitly overridden.
 
@@ -89,9 +95,12 @@ sequenceDiagram
 ## 6. Scheduling and Concurrency
 
 1. Global concurrency is controlled by Engine.
-2. Child expansion concurrency is declared per node via `ChildMaxConcurrency`.
-3. Child expansion concurrency is declared per node via `ChildMaxConcurrency`.
-4. Queue backpressure is enforced by the scheduler.
+2. Stage-level request/download concurrency is declared by `NodeExecutionProfile.StageOptions`.
+3. Stage-level queue capacity and backpressure mode are declared by `NodeExecutionProfile.StageOptions`.
+4. Stage-level minimum request interval and risk-control retry parameters are declared by `NodeExecutionProfile.StageOptions`.
+5. Child expansion concurrency is declared per node via `NodeExecutionProfile.ExecutionOptions.ChildMaxConcurrency`.
+6. Same node-type request concurrency is declared by `NodeExecutionProfile.ExecutionOptions.NodeTypeMaxConcurrency` (<= 0 means unlimited).
+7. Same node-type pacing and adaptive backoff are declared by `NodeExecutionProfile.FlowControlOptions`.
 
 ## 7. Design Constraints
 

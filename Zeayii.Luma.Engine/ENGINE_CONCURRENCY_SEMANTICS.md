@@ -3,8 +3,9 @@
 ## 1. 结构化并发
 
 - 每个节点运行时由 `LumaNodeRuntime` 承载。
-- 父节点通过 `AddChild` 形成子树，并发上限由父节点 `NodeExecutionOptions` 控制。
+- 父节点通过 `AddChild` 形成子树，并发上限由父节点 `NodeExecutionProfile.ExecutionOptions` 控制。
 - 子节点并发槽在“子节点子树完成”后释放，不在“子节点注册完成”时释放。
+- 同类型节点请求并发由 `NodeExecutionProfile.ExecutionOptions.NodeTypeMaxConcurrency` 控制（<=0 不限制）。
 
 ## 2. 取消传播（严格单向）
 
@@ -39,5 +40,6 @@
 ## 5. 流控策略可插拔
 
 - 节点流控由 `INodeRequestFlowControlStrategy` 描述。
+- 节点流控配置来源于 `NodeExecutionProfile.FlowControlOptions`。
 - 引擎支持通过 `LumaEngineOptions.NodeFlowControlStrategyResolver` 注入策略解析器。
 - 未注入时使用框架默认策略解析逻辑。

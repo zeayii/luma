@@ -38,9 +38,11 @@ internal static class CommonCommandOptionsBuilder
                 NetLogLevelOption = CreateOption("--net-log-level", "网络模块日志等级。", NetLogLevel.Info),
                 MaxLogEntriesOption = CreateOption("--max-log-entries", "窗口日志最大行数。", 1000),
                 RefreshIntervalMillisecondsOption = CreateOption("--refresh-interval-ms", "窗口刷新间隔（毫秒）。", 250),
+                RequestWorkerCountOption = CreateOption("--request-workers", "请求工作协程数量。", 4),
                 DownloadWorkerCountOption = CreateOption("--download-workers", "下载工作协程数量。", 4),
                 PersistWorkerCountOption = CreateOption("--persist-workers", "持久化工作协程数量。", 2),
                 RequestChannelCapacityOption = CreateOption("--request-channel-capacity", "请求通道容量。", 512),
+                DownloadChannelCapacityOption = CreateOption("--download-channel-capacity", "下载通道容量。", 512),
                 PersistChannelCapacityOption = CreateOption("--persist-channel-capacity", "持久化通道容量。", 512),
                 PersistBatchSizeOption = CreateOption("--persist-batch-size", "持久化批量大小。", 100),
                 PersistFlushIntervalMillisecondsOption = CreateOption("--persist-flush-interval-ms", "持久化聚合刷新间隔（毫秒）。", 500),
@@ -103,9 +105,11 @@ internal static class CommonCommandOptionsBuilder
         ValidateMinimum(options.Common.LogFileSizeMegabytesOption, 1, "--log-file-size-mb");
         ValidateMinimum(options.Common.MaxLogEntriesOption, 100, "--max-log-entries");
         ValidateMinimum(options.Common.RefreshIntervalMillisecondsOption, 50, "--refresh-interval-ms");
+        ValidateMinimum(options.Common.RequestWorkerCountOption, 1, "--request-workers");
         ValidateMinimum(options.Common.DownloadWorkerCountOption, 1, "--download-workers");
         ValidateMinimum(options.Common.PersistWorkerCountOption, 1, "--persist-workers");
         ValidateMinimum(options.Common.RequestChannelCapacityOption, 32, "--request-channel-capacity");
+        ValidateMinimum(options.Common.DownloadChannelCapacityOption, 32, "--download-channel-capacity");
         ValidateMinimum(options.Common.PersistChannelCapacityOption, 32, "--persist-channel-capacity");
         ValidateMinimum(options.Common.PersistBatchSizeOption, 1, "--persist-batch-size");
         ValidateMinimum(options.Common.PersistFlushIntervalMillisecondsOption, 1, "--persist-flush-interval-ms");
@@ -146,9 +150,11 @@ internal static class CommonCommandOptionsBuilder
         Add(command, options.Common.NetLogLevelOption);
         Add(command, options.Common.MaxLogEntriesOption);
         Add(command, options.Common.RefreshIntervalMillisecondsOption);
+        Add(command, options.Common.RequestWorkerCountOption);
         Add(command, options.Common.DownloadWorkerCountOption);
         Add(command, options.Common.PersistWorkerCountOption);
         Add(command, options.Common.RequestChannelCapacityOption);
+        Add(command, options.Common.DownloadChannelCapacityOption);
         Add(command, options.Common.PersistChannelCapacityOption);
         Add(command, options.Common.PersistBatchSizeOption);
         Add(command, options.Common.PersistFlushIntervalMillisecondsOption);
@@ -202,51 +208,53 @@ internal static class CommonCommandOptionsBuilder
         {
             CommandName = commandName,
             RunName = string.IsNullOrWhiteSpace(runName) ? $"{commandName}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}" : runName,
-            LogDirectory = parseResult.GetValue(options.Common.LogDirectoryOption) ?? Path.Combine(Environment.CurrentDirectory, "logs"),
-            ConsoleLogLevel = parseResult.GetValue(options.Common.ConsoleLogLevelOption),
-            FileLogLevel = parseResult.GetValue(options.Common.FileLogLevelOption),
-            LogRetentionDays = parseResult.GetValue(options.Common.LogRetentionDaysOption),
-            LogTotalSizeMegabytes = parseResult.GetValue(options.Common.LogTotalSizeMegabytesOption),
-            LogFileSizeMegabytes = parseResult.GetValue(options.Common.LogFileSizeMegabytesOption),
-            NetLogLevel = parseResult.GetValue(options.Common.NetLogLevelOption),
-            MaxLogEntries = parseResult.GetValue(options.Common.MaxLogEntriesOption),
-            RefreshIntervalMilliseconds = parseResult.GetValue(options.Common.RefreshIntervalMillisecondsOption),
-            DownloadWorkerCount = parseResult.GetValue(options.Common.DownloadWorkerCountOption),
-            PersistWorkerCount = parseResult.GetValue(options.Common.PersistWorkerCountOption),
-            RequestChannelCapacity = parseResult.GetValue(options.Common.RequestChannelCapacityOption),
-            PersistChannelCapacity = parseResult.GetValue(options.Common.PersistChannelCapacityOption),
-            PersistBatchSize = parseResult.GetValue(options.Common.PersistBatchSizeOption),
-            PersistFlushIntervalMilliseconds = parseResult.GetValue(options.Common.PersistFlushIntervalMillisecondsOption),
-            MaxResponseBodyBytes = parseResult.GetValue(options.Common.MaxResponseBodyBytesOption),
-            DefaultTimeoutSeconds = parseResult.GetValue(options.Common.DefaultTimeoutSecondsOption),
-            Proxies = parseResult.GetValue(options.Common.ProxiesOption) ?? Array.Empty<string>(),
-            DefaultRouteKind = parseResult.GetValue(options.Common.DefaultRouteKindOption),
-            RetryEnabled = parseResult.GetValue(options.Common.RetryEnabledOption),
-            RetryMaxAttempts = parseResult.GetValue(options.Common.RetryMaxAttemptsOption),
-            RetryDelayMode = parseResult.GetValue(options.Common.RetryDelayModeOption),
-            RetryBaseDelayMilliseconds = parseResult.GetValue(options.Common.RetryBaseDelayMillisecondsOption),
-            RetryMaxDelayMilliseconds = parseResult.GetValue(options.Common.RetryMaxDelayMillisecondsOption),
-            RetryIdempotentOnly = parseResult.GetValue(options.Common.RetryIdempotentOnlyOption),
-            RetryFailurePolicy = parseResult.GetValue(options.Common.RetryFailurePolicyOption),
-            RedirectEnabled = parseResult.GetValue(options.Common.RedirectEnabledOption),
-            RedirectMaxRedirects = parseResult.GetValue(options.Common.RedirectMaxRedirectsOption),
-            AllowHttpsToHttp = parseResult.GetValue(options.Common.AllowHttpsToHttpOption),
-            RedirectMethodRewriteMode = parseResult.GetValue(options.Common.RedirectMethodRewriteModeOption),
-            ProxySelectionMode = parseResult.GetValue(options.Common.ProxySelectionModeOption),
-            FallbackToDirectWhenNoProxy = parseResult.GetValue(options.Common.FallbackToDirectWhenNoProxyOption),
-            HeaderPresetMode = parseResult.GetValue(options.Common.HeaderPresetModeOption),
-            RequestPacingEnabled = parseResult.GetValue(options.Common.RequestPacingEnabledOption),
-            RequestPacingMinIntervalMilliseconds = parseResult.GetValue(options.Common.RequestPacingMinIntervalMillisecondsOption),
-            CircuitBreakerEnabled = parseResult.GetValue(options.Common.CircuitBreakerEnabledOption),
-            CircuitBreakerFailureThreshold = parseResult.GetValue(options.Common.CircuitBreakerFailureThresholdOption),
-            CircuitBreakerBreakDurationMilliseconds = parseResult.GetValue(options.Common.CircuitBreakerBreakDurationMillisecondsOption),
-            RateLimitEnabled = parseResult.GetValue(options.Common.RateLimitEnabledOption),
-            GlobalRequestsPerSecond = parseResult.GetValue(options.Common.GlobalRequestsPerSecondOption),
-            PerEgressRequestsPerSecond = parseResult.GetValue(options.Common.PerEgressRequestsPerSecondOption),
-            HealthCheckEnabled = parseResult.GetValue(options.Common.HealthCheckEnabledOption),
-            HealthCheckIntervalMilliseconds = parseResult.GetValue(options.Common.HealthCheckIntervalMillisecondsOption),
-            HealthCheckTimeoutMilliseconds = parseResult.GetValue(options.Common.HealthCheckTimeoutMillisecondsOption),
-            HealthCheckFailureThreshold = parseResult.GetValue(options.Common.HealthCheckFailureThresholdOption)
+            LogDirectory = parseResult.GetRequiredValue(options.Common.LogDirectoryOption),
+            ConsoleLogLevel = parseResult.GetRequiredValue(options.Common.ConsoleLogLevelOption),
+            FileLogLevel = parseResult.GetRequiredValue(options.Common.FileLogLevelOption),
+            LogRetentionDays = parseResult.GetRequiredValue(options.Common.LogRetentionDaysOption),
+            LogTotalSizeMegabytes = parseResult.GetRequiredValue(options.Common.LogTotalSizeMegabytesOption),
+            LogFileSizeMegabytes = parseResult.GetRequiredValue(options.Common.LogFileSizeMegabytesOption),
+            NetLogLevel = parseResult.GetRequiredValue(options.Common.NetLogLevelOption),
+            MaxLogEntries = parseResult.GetRequiredValue(options.Common.MaxLogEntriesOption),
+            RefreshIntervalMilliseconds = parseResult.GetRequiredValue(options.Common.RefreshIntervalMillisecondsOption),
+            RequestWorkerCount = parseResult.GetRequiredValue(options.Common.RequestWorkerCountOption),
+            DownloadWorkerCount = parseResult.GetRequiredValue(options.Common.DownloadWorkerCountOption),
+            PersistWorkerCount = parseResult.GetRequiredValue(options.Common.PersistWorkerCountOption),
+            RequestChannelCapacity = parseResult.GetRequiredValue(options.Common.RequestChannelCapacityOption),
+            DownloadChannelCapacity = parseResult.GetRequiredValue(options.Common.DownloadChannelCapacityOption),
+            PersistChannelCapacity = parseResult.GetRequiredValue(options.Common.PersistChannelCapacityOption),
+            PersistBatchSize = parseResult.GetRequiredValue(options.Common.PersistBatchSizeOption),
+            PersistFlushIntervalMilliseconds = parseResult.GetRequiredValue(options.Common.PersistFlushIntervalMillisecondsOption),
+            MaxResponseBodyBytes = parseResult.GetRequiredValue(options.Common.MaxResponseBodyBytesOption),
+            DefaultTimeoutSeconds = parseResult.GetRequiredValue(options.Common.DefaultTimeoutSecondsOption),
+            Proxies = parseResult.GetRequiredValue(options.Common.ProxiesOption),
+            DefaultRouteKind = parseResult.GetRequiredValue(options.Common.DefaultRouteKindOption),
+            RetryEnabled = parseResult.GetRequiredValue(options.Common.RetryEnabledOption),
+            RetryMaxAttempts = parseResult.GetRequiredValue(options.Common.RetryMaxAttemptsOption),
+            RetryDelayMode = parseResult.GetRequiredValue(options.Common.RetryDelayModeOption),
+            RetryBaseDelayMilliseconds = parseResult.GetRequiredValue(options.Common.RetryBaseDelayMillisecondsOption),
+            RetryMaxDelayMilliseconds = parseResult.GetRequiredValue(options.Common.RetryMaxDelayMillisecondsOption),
+            RetryIdempotentOnly = parseResult.GetRequiredValue(options.Common.RetryIdempotentOnlyOption),
+            RetryFailurePolicy = parseResult.GetRequiredValue(options.Common.RetryFailurePolicyOption),
+            RedirectEnabled = parseResult.GetRequiredValue(options.Common.RedirectEnabledOption),
+            RedirectMaxRedirects = parseResult.GetRequiredValue(options.Common.RedirectMaxRedirectsOption),
+            AllowHttpsToHttp = parseResult.GetRequiredValue(options.Common.AllowHttpsToHttpOption),
+            RedirectMethodRewriteMode = parseResult.GetRequiredValue(options.Common.RedirectMethodRewriteModeOption),
+            ProxySelectionMode = parseResult.GetRequiredValue(options.Common.ProxySelectionModeOption),
+            FallbackToDirectWhenNoProxy = parseResult.GetRequiredValue(options.Common.FallbackToDirectWhenNoProxyOption),
+            HeaderPresetMode = parseResult.GetRequiredValue(options.Common.HeaderPresetModeOption),
+            RequestPacingEnabled = parseResult.GetRequiredValue(options.Common.RequestPacingEnabledOption),
+            RequestPacingMinIntervalMilliseconds = parseResult.GetRequiredValue(options.Common.RequestPacingMinIntervalMillisecondsOption),
+            CircuitBreakerEnabled = parseResult.GetRequiredValue(options.Common.CircuitBreakerEnabledOption),
+            CircuitBreakerFailureThreshold = parseResult.GetRequiredValue(options.Common.CircuitBreakerFailureThresholdOption),
+            CircuitBreakerBreakDurationMilliseconds = parseResult.GetRequiredValue(options.Common.CircuitBreakerBreakDurationMillisecondsOption),
+            RateLimitEnabled = parseResult.GetRequiredValue(options.Common.RateLimitEnabledOption),
+            GlobalRequestsPerSecond = parseResult.GetRequiredValue(options.Common.GlobalRequestsPerSecondOption),
+            PerEgressRequestsPerSecond = parseResult.GetRequiredValue(options.Common.PerEgressRequestsPerSecondOption),
+            HealthCheckEnabled = parseResult.GetRequiredValue(options.Common.HealthCheckEnabledOption),
+            HealthCheckIntervalMilliseconds = parseResult.GetRequiredValue(options.Common.HealthCheckIntervalMillisecondsOption),
+            HealthCheckTimeoutMilliseconds = parseResult.GetRequiredValue(options.Common.HealthCheckTimeoutMillisecondsOption),
+            HealthCheckFailureThreshold = parseResult.GetRequiredValue(options.Common.HealthCheckFailureThresholdOption)
         };
     }
 

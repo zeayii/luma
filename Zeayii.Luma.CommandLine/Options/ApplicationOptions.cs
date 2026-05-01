@@ -69,6 +69,11 @@ internal sealed class ApplicationOptions
     public required int RefreshIntervalMilliseconds { get; init; }
 
     /// <summary>
+    ///     请求工作协程数量。
+    /// </summary>
+    public required int RequestWorkerCount { get; init; }
+
+    /// <summary>
     ///     下载工作协程数量。
     /// </summary>
     public required int DownloadWorkerCount { get; init; }
@@ -82,6 +87,11 @@ internal sealed class ApplicationOptions
     ///     请求通道容量。
     /// </summary>
     public required int RequestChannelCapacity { get; init; }
+
+    /// <summary>
+    ///     下载通道容量。
+    /// </summary>
+    public required int DownloadChannelCapacity { get; init; }
 
     /// <summary>
     ///     持久化通道容量。

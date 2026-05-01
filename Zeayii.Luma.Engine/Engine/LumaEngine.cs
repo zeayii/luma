@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics;
 using System.Net;
+using System.Threading.RateLimiting;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Zeayii.Infrastructure.Net.Abstractions.Http;
@@ -77,6 +78,36 @@ public sealed class LumaEngine<TState>
     ///     按节点类型共享的请求流控器集合。
     /// </summary>
     private readonly ConcurrentDictionary<Type, NodeTypeRequestFlowController> _nodeTypeRequestFlowControllers = new();
+
+    /// <summary>
+    ///     按节点类型共享的并发闸门集合。
+    /// </summary>
+    private readonly ConcurrentDictionary<Type, NodeTypeConcurrencyController> _nodeTypeConcurrencyControllers = new();
+
+    /// <summary>
+    ///     按阶段共享执行选项目录。
+    /// </summary>
+    private readonly ConcurrentDictionary<string, NodeStageExecutionOptions> _stageExecutionOptionsCatalog = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    ///     按阶段共享普通请求并发闸门。
+    /// </summary>
+    private readonly ConcurrentDictionary<string, StageConcurrencyController> _stageRequestConcurrencyGates = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    ///     按阶段共享下载请求并发闸门。
+    /// </summary>
+    private readonly ConcurrentDictionary<string, StageConcurrencyController> _stageDownloadConcurrencyGates = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    ///     按阶段共享最小请求间隔限流器。
+    /// </summary>
+    private readonly ConcurrentDictionary<string, RateLimiter> _stageRequestIntervalLimiters = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    ///     全局最小请求间隔限流器。
+    /// </summary>
+    private readonly RateLimiter? _globalRequestIntervalLimiter;
 
     /// <summary>
     ///     引擎选项。
@@ -164,6 +195,11 @@ public sealed class LumaEngine<TState>
     private long _storedItemCount;
 
     /// <summary>
+    ///     请求内容缓存键（用于重试期间复用缓冲内容）。
+    /// </summary>
+    private static readonly HttpRequestOptionsKey<byte[]> CachedRequestContentBytesOptionKey = new("luma.cached-request-content-bytes");
+
+    /// <summary>
     ///     初始化引擎。
     /// </summary>
     /// <param name="itemSink">持久化入口。</param>
@@ -194,6 +230,9 @@ public sealed class LumaEngine<TState>
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _timeProvider = options.TimeProvider;
         _flowControlStrategyResolver = options.NodeFlowControlStrategyResolver ?? NodeRequestFlowControlStrategyRegistry.ResolveOrDefault;
+        _globalRequestIntervalLimiter = options.GlobalMinRequestIntervalMilliseconds > 0
+            ? CreateMinIntervalLimiter(options.GlobalMinRequestIntervalMilliseconds)
+            : null;
     }
 
     /// <summary>
@@ -305,6 +344,26 @@ public sealed class LumaEngine<TState>
     {
         _nodeRuntimes.Clear();
         _nodeTypeRequestFlowControllers.Clear();
+        _nodeTypeConcurrencyControllers.Clear();
+        _stageExecutionOptionsCatalog.Clear();
+        foreach (var gate in _stageRequestConcurrencyGates.Values)
+        {
+            gate.Dispose();
+        }
+
+        foreach (var gate in _stageDownloadConcurrencyGates.Values)
+        {
+            gate.Dispose();
+        }
+
+        foreach (var limiter in _stageRequestIntervalLimiters.Values)
+        {
+            limiter.Dispose();
+        }
+
+        _stageRequestConcurrencyGates.Clear();
+        _stageDownloadConcurrencyGates.Clear();
+        _stageRequestIntervalLimiters.Clear();
         _rootRuntime = null;
         _dirtyRuntimePathSet.Clear();
         while (_dirtyRuntimePaths.TryDequeue(out _))
@@ -349,7 +408,32 @@ public sealed class LumaEngine<TState>
         var path = string.IsNullOrWhiteSpace(parentPath) ? node.Key : $"{parentPath}/{node.Key}";
         var depth = parentRuntime is null ? 0 : parentRuntime.Depth + 1;
         var parentToken = parentRuntime?.Context.CancellationToken ?? runRuntime.Token;
-        var runtime = new LumaNodeRuntime<TState>(node, path, depth, runRuntime.RunId, runRuntime.RunName, runRuntime.CommandName, nodeState, _htmlParser, cookieAccessor, _loggerFactory, parentToken);
+        var bootstrapContext = new LumaContext<TState>(
+            runRuntime.RunId,
+            runRuntime.RunName,
+            runRuntime.CommandName,
+            path,
+            depth,
+            node.ExecutionOptions.DefaultRouteKind,
+            nodeState,
+            _htmlParser,
+            cookieAccessor,
+            _loggerFactory.CreateLogger(node.GetType()),
+            parentToken);
+        var executionProfile = node.ResolveExecutionProfile(bootstrapContext);
+        var runtime = new LumaNodeRuntime<TState>(
+            node,
+            path,
+            depth,
+            runRuntime.RunId,
+            runRuntime.RunName,
+            runRuntime.CommandName,
+            nodeState,
+            _htmlParser,
+            cookieAccessor,
+            _loggerFactory,
+            executionProfile,
+            parentToken);
 
         if (!_nodeRuntimes.TryAdd(path, runtime))
         {
@@ -405,10 +489,18 @@ public sealed class LumaEngine<TState>
     /// <returns>异步任务。</returns>
     private async Task BuildNodeRequestsAsync(LumaNodeRuntime<TState> runtime, NodeTaskScheduler requestScheduler, CancellationToken cancellationToken)
     {
+        var emittedRequestCount = 0;
         await foreach (var request in runtime.Node.BuildRequestsAsync(runtime.Context).WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            var normalizedRequest = NormalizeRequest(request, runtime.Path);
-            await requestScheduler.EnqueueAsync(normalizedRequest, cancellationToken).ConfigureAwait(false);
+            emittedRequestCount++;
+            if (emittedRequestCount > 1)
+            {
+                throw new InvalidOperationException($"Node '{runtime.Path}' emitted more than one primary request. A node must emit at most one request.");
+            }
+
+            var stageOptions = ResolveStageExecutionOptions(runtime);
+            var normalizedRequest = NormalizeRequest(request, runtime.Path, stageOptions.StageKey);
+            await EnqueueRequestWithStageControlAsync(runtime, normalizedRequest, requestScheduler, cancellationToken).ConfigureAwait(false);
             runtime.State.IncrementQueued();
             SignalStateChanged(runtime);
         }
@@ -448,19 +540,24 @@ public sealed class LumaEngine<TState>
                     continue;
                 }
 
-                runtime.State.IncrementActive();
-                Interlocked.Increment(ref _activeNetworkCount);
-                SignalStateChanged(runtime);
-
+                var activeMarked = false;
                 try
                 {
+                    await using var stageConcurrencyLease = await AcquireStageConcurrencyLeaseAsync(runtime, isDownload: false, runtime.Context.CancellationToken).ConfigureAwait(false);
+                    await using var concurrencyLease = await AcquireNodeTypeConcurrencyLeaseAsync(runtime, runtime.Context.CancellationToken).ConfigureAwait(false);
+
+                    runtime.State.IncrementActive();
+                    Interlocked.Increment(ref _activeNetworkCount);
+                    SignalStateChanged(runtime);
+                    activeMarked = true;
+
                     var requestFlowController = await ResolveNodeTypeRequestFlowControllerAsync(runtime).ConfigureAwait(false);
                     if (requestFlowController is not null)
                     {
                         await requestFlowController.WaitTurnAsync(runtime.Context.CancellationToken).ConfigureAwait(false);
                     }
 
-                    using var response = await SendAsync(request, runtime.Context, runtime.Context.CancellationToken).ConfigureAwait(false);
+                    using var response = await SendWithRiskControlAsync(request, runtime, runtime.Context.CancellationToken).ConfigureAwait(false);
                     requestFlowController?.ObserveResponse(response.StatusCode);
                     await runtime.Node.HandleResponseAsync(response, runtime.Context).ConfigureAwait(false);
                     await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistScheduler, request).ConfigureAwait(false);
@@ -486,8 +583,9 @@ public sealed class LumaEngine<TState>
                         {
                             await foreach (var downloadRequest in runtime.Node.BuildDownloadRequestsAsync(response, runtime.Context).WithCancellation(runtime.Context.CancellationToken).ConfigureAwait(false))
                             {
-                                var normalizedDownloadRequest = NormalizeRequest(downloadRequest, runtime.Path);
-                                await downloadScheduler.EnqueueAsync(normalizedDownloadRequest, runRuntime.Token).ConfigureAwait(false);
+                                var stageOptions = ResolveStageExecutionOptions(runtime);
+                                var normalizedDownloadRequest = NormalizeRequest(downloadRequest, runtime.Path, stageOptions.StageKey);
+                                await EnqueueDownloadWithStageControlAsync(runtime, normalizedDownloadRequest, downloadScheduler, runRuntime.Token).ConfigureAwait(false);
                                 runtime.State.IncrementQueued();
                                 SignalStateChanged(runtime);
                             }
@@ -522,9 +620,12 @@ public sealed class LumaEngine<TState>
                 }
                 finally
                 {
-                    runtime.State.DecrementActive();
-                    Interlocked.Decrement(ref _activeNetworkCount);
-                    SignalStateChanged(runtime);
+                    if (activeMarked)
+                    {
+                        runtime.State.DecrementActive();
+                        Interlocked.Decrement(ref _activeNetworkCount);
+                        SignalStateChanged(runtime);
+                    }
                 }
             }
         }
@@ -568,19 +669,24 @@ public sealed class LumaEngine<TState>
                     continue;
                 }
 
-                runtime.State.IncrementActive();
-                Interlocked.Increment(ref _activeNetworkCount);
-                SignalStateChanged(runtime);
-
+                var activeMarked = false;
                 try
                 {
+                    await using var stageConcurrencyLease = await AcquireStageConcurrencyLeaseAsync(runtime, isDownload: true, runtime.Context.CancellationToken).ConfigureAwait(false);
+                    await using var concurrencyLease = await AcquireNodeTypeConcurrencyLeaseAsync(runtime, runtime.Context.CancellationToken).ConfigureAwait(false);
+
+                    runtime.State.IncrementActive();
+                    Interlocked.Increment(ref _activeNetworkCount);
+                    SignalStateChanged(runtime);
+                    activeMarked = true;
+
                     var requestFlowController = await ResolveNodeTypeRequestFlowControllerAsync(runtime).ConfigureAwait(false);
                     if (requestFlowController is not null)
                     {
                         await requestFlowController.WaitTurnAsync(runtime.Context.CancellationToken).ConfigureAwait(false);
                     }
 
-                    using var response = await SendAsync(request, runtime.Context, runtime.Context.CancellationToken).ConfigureAwait(false);
+                    using var response = await SendWithRiskControlAsync(request, runtime, runtime.Context.CancellationToken).ConfigureAwait(false);
                     requestFlowController?.ObserveResponse(response.StatusCode);
                     await runtime.Node.HandleDownloadResponseAsync(response, request, runtime.Context).ConfigureAwait(false);
                     await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistScheduler, request).ConfigureAwait(false);
@@ -604,9 +710,12 @@ public sealed class LumaEngine<TState>
                 }
                 finally
                 {
-                    runtime.State.DecrementActive();
-                    Interlocked.Decrement(ref _activeNetworkCount);
-                    SignalStateChanged(runtime);
+                    if (activeMarked)
+                    {
+                        runtime.State.DecrementActive();
+                        Interlocked.Decrement(ref _activeNetworkCount);
+                        SignalStateChanged(runtime);
+                    }
                 }
             }
         }
@@ -632,7 +741,7 @@ public sealed class LumaEngine<TState>
         if (dispatchBatch.HasWork)
         {
             WriteUnifiedLog(LogLevelKind.Debug, "Scheduler",
-                $"Event=DispatchBatchPrepared NodePath={runtime.Path} ChildMaxConcurrency={runtime.Node.ExecutionOptions.ChildMaxConcurrency} RequestCount={dispatchBatch.Requests.Count} ItemCount={dispatchBatch.Items.Count} ChildCount={dispatchBatch.Children.Count}");
+                $"Event=DispatchBatchPrepared NodePath={runtime.Path} ChildMaxConcurrency={runtime.ExecutionProfile.ExecutionOptions.ChildMaxConcurrency} RequestCount={dispatchBatch.Requests.Count} ItemCount={dispatchBatch.Items.Count} ChildCount={dispatchBatch.Children.Count}");
         }
 
         if (dispatchBatch.StopNode)
@@ -647,8 +756,9 @@ public sealed class LumaEngine<TState>
         {
             foreach (var request in dispatchBatch.Requests)
             {
-                var normalizedRequest = NormalizeRequest(request, runtime.Path);
-                await requestScheduler.EnqueueAsync(normalizedRequest, runRuntime.Token).ConfigureAwait(false);
+                var stageOptions = ResolveStageExecutionOptions(runtime);
+                var normalizedRequest = NormalizeRequest(request, runtime.Path, stageOptions.StageKey);
+                await EnqueueRequestWithStageControlAsync(runtime, normalizedRequest, requestScheduler, runRuntime.Token).ConfigureAwait(false);
                 runtime.State.IncrementQueued();
                 SignalStateChanged(runtime);
             }
@@ -661,19 +771,19 @@ public sealed class LumaEngine<TState>
 
         if (!shouldBlockExpansion && dispatchBatch.Children.Count > 0)
         {
-            EnqueueChildrenForExpansion(dispatchBatch.Children, runtime, runRuntime, requestScheduler, persistScheduler);
+            StartChildRegistrations(dispatchBatch.Children, runtime, runRuntime, requestScheduler, persistScheduler);
         }
     }
 
     /// <summary>
-    ///     将子节点批次加入扩展队列，并按需启动扩展泵。
+    ///     启动子节点注册任务。
     /// </summary>
     /// <param name="children">子节点集合。</param>
     /// <param name="parentRuntime">父节点运行时。</param>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <param name="requestScheduler">普通请求调度器。</param>
     /// <param name="persistScheduler">持久化调度器。</param>
-    private void EnqueueChildrenForExpansion(IReadOnlyList<NodeChildBinding<TState>> children, LumaNodeRuntime<TState> parentRuntime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler,
+    private void StartChildRegistrations(IReadOnlyList<NodeChildBinding<TState>> children, LumaNodeRuntime<TState> parentRuntime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler,
         PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler)
     {
         if (children.Count == 0)
@@ -681,79 +791,63 @@ public sealed class LumaEngine<TState>
             return;
         }
 
-        parentRuntime.EnqueuePendingChildRegistrations(children);
-        SignalStateChanged(parentRuntime);
-
-        if (!parentRuntime.TryAcquireExpansionPump())
+        var childIndex = 0;
+        foreach (var childBinding in children)
         {
-            return;
+            childIndex++;
+            parentRuntime.IncrementPendingChildRegistrationTask();
+            _ = RegisterChildWithSlotAsync(childBinding, parentRuntime, runRuntime, requestScheduler, persistScheduler, childIndex);
         }
 
-        _ = RunExpansionPumpAsync(parentRuntime, runRuntime, requestScheduler, persistScheduler);
+        SignalStateChanged(parentRuntime);
     }
 
     /// <summary>
-    ///     运行父节点扩展泵。
-    ///     <para>
-    ///         扩展泵独立于请求工作线程，负责按父节点并发上限启动子节点，避免在请求热路径中等待子槽位。
-    ///     </para>
+    ///     通过并发槽位保护注册单个子节点。
     /// </summary>
+    /// <param name="childBinding">子节点映射定义。</param>
     /// <param name="parentRuntime">父节点运行时。</param>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <param name="requestScheduler">普通请求调度器。</param>
     /// <param name="persistScheduler">持久化调度器。</param>
+    /// <param name="childIndex">子节点序号。</param>
     /// <returns>异步任务。</returns>
-    private async Task RunExpansionPumpAsync(LumaNodeRuntime<TState> parentRuntime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler, PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler)
+    private async Task RegisterChildWithSlotAsync(NodeChildBinding<TState> childBinding, LumaNodeRuntime<TState> parentRuntime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler,
+        PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler, int childIndex)
     {
-        while (true)
+        var acquiredSlot = false;
+        var registrationStarted = false;
+        try
         {
-            var shouldRestart = false;
-            try
+            var waitStopwatch = Stopwatch.StartNew();
+            await parentRuntime.WaitChildSlotAsync(parentRuntime.Context.CancellationToken).ConfigureAwait(false);
+            waitStopwatch.Stop();
+            acquiredSlot = true;
+            if (waitStopwatch.ElapsedMilliseconds >= ChildSlotWaitDiagnosticThresholdMilliseconds)
             {
-                var childIndex = 0;
-                while (!runRuntime.Token.IsCancellationRequested && !parentRuntime.CancellationTokenSource.IsCancellationRequested)
-                {
-                    if (!parentRuntime.TryDequeuePendingChildRegistration(out var childBinding))
-                    {
-                        return;
-                    }
-
-                    childIndex++;
-                    var waitStopwatch = Stopwatch.StartNew();
-                    await parentRuntime.WaitChildSlotAsync(parentRuntime.Context.CancellationToken).ConfigureAwait(false);
-                    waitStopwatch.Stop();
-                    if (waitStopwatch.ElapsedMilliseconds >= ChildSlotWaitDiagnosticThresholdMilliseconds)
-                    {
-                        TryWriteChildSlotWaitSlowLog(parentRuntime, requestScheduler, childIndex, waitStopwatch.ElapsedMilliseconds);
-                    }
-
-                    parentRuntime.IncrementRegisteringChild();
-                    await RegisterChildInternalAsync(childBinding, parentRuntime, runRuntime, requestScheduler, persistScheduler).ConfigureAwait(false);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // ignore
-            }
-            catch (Exception exception)
-            {
-                WriteUnifiedLog(LogLevelKind.Error, "Scheduler", $"Event=ExpansionPumpFailed ParentNodePath={parentRuntime.Path} ErrorMessage={exception.Message}", exception);
-            }
-            finally
-            {
-                parentRuntime.ReleaseExpansionPump();
-                SignalStateChanged(parentRuntime);
-
-                if (!runRuntime.Token.IsCancellationRequested && !parentRuntime.CancellationTokenSource.IsCancellationRequested && parentRuntime.PendingChildRegistrationCount > 0 && parentRuntime.TryAcquireExpansionPump())
-                {
-                    shouldRestart = true;
-                }
+                TryWriteChildSlotWaitSlowLog(parentRuntime, requestScheduler, childIndex, waitStopwatch.ElapsedMilliseconds);
             }
 
-            if (!shouldRestart)
+            parentRuntime.IncrementRegisteringChild();
+            registrationStarted = true;
+            await RegisterChildInternalAsync(childBinding, parentRuntime, runRuntime, requestScheduler, persistScheduler).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (runRuntime.Token.IsCancellationRequested || parentRuntime.CancellationTokenSource.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            WriteUnifiedLog(LogLevelKind.Error, "Scheduler", $"Event=RegisterChildFailed ParentNodePath={parentRuntime.Path} ChildIndex={childIndex} ErrorMessage={exception.Message}", exception);
+        }
+        finally
+        {
+            parentRuntime.DecrementPendingChildRegistrationTask();
+            if (acquiredSlot && !registrationStarted)
             {
-                return;
+                parentRuntime.ReleaseChildSlot();
             }
+
+            SignalStateChanged(parentRuntime);
         }
     }
 
@@ -808,6 +902,82 @@ public sealed class LumaEngine<TState>
     }
 
     /// <summary>
+    ///     等待阶段最小请求间隔。
+    /// </summary>
+    /// <param name="stageOptions">阶段选项。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>异步任务。</returns>
+    private async ValueTask WaitStageMinIntervalAsync(NodeStageExecutionOptions stageOptions, CancellationToken cancellationToken)
+    {
+        if (stageOptions.MinRequestIntervalMilliseconds <= 0)
+        {
+            return;
+        }
+
+        var stageKey = NormalizeStageKey(stageOptions.StageKey);
+        var limiter = _stageRequestIntervalLimiters.GetOrAdd(stageKey, _ => CreateMinIntervalLimiter(stageOptions.MinRequestIntervalMilliseconds));
+        using var lease = await limiter.AcquireAsync(1, cancellationToken).ConfigureAwait(false);
+        if (!lease.IsAcquired)
+        {
+            throw new OperationCanceledException("Stage min-interval limiter lease was not acquired.", cancellationToken);
+        }
+    }
+
+    /// <summary>
+    ///     等待全局最小请求间隔。
+    /// </summary>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>异步任务。</returns>
+    private async ValueTask WaitGlobalMinIntervalAsync(CancellationToken cancellationToken)
+    {
+        if (_globalRequestIntervalLimiter is null)
+        {
+            return;
+        }
+
+        using var lease = await _globalRequestIntervalLimiter.AcquireAsync(1, cancellationToken).ConfigureAwait(false);
+        if (!lease.IsAcquired)
+        {
+            throw new OperationCanceledException("Global min-interval limiter lease was not acquired.", cancellationToken);
+        }
+    }
+
+    /// <summary>
+    ///     发送请求并应用阶段风控重试策略。
+    /// </summary>
+    /// <param name="request">请求对象。</param>
+    /// <param name="runtime">节点运行时。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>HTTP 响应。</returns>
+    private async ValueTask<HttpResponseMessage> SendWithRiskControlAsync(LumaRequest request, LumaNodeRuntime<TState> runtime, CancellationToken cancellationToken)
+    {
+        var stageOptions = ResolveStageExecutionOptions(runtime);
+        var maxRetries = Math.Max(0, stageOptions.RiskControlMaxRetries);
+        var initialDelay = Math.Max(1, stageOptions.RiskControlInitialDelayMilliseconds);
+        var maxDelay = Math.Max(initialDelay, stageOptions.RiskControlMaxDelayMilliseconds);
+        var retryStatusCodes = stageOptions.RiskControlStatusCodes.Count == 0 ? null : stageOptions.RiskControlStatusCodes;
+
+        var attempt = 0;
+        while (true)
+        {
+            await WaitGlobalMinIntervalAsync(cancellationToken).ConfigureAwait(false);
+            await WaitStageMinIntervalAsync(stageOptions, cancellationToken).ConfigureAwait(false);
+            var response = await SendAsync(request, runtime.Context, cancellationToken).ConfigureAwait(false);
+            if (!ShouldRiskRetry(response.StatusCode, retryStatusCodes) || attempt >= maxRetries)
+            {
+                return response;
+            }
+
+            attempt++;
+            var delayMilliseconds = ComputeRiskRetryDelayMilliseconds(initialDelay, maxDelay, attempt);
+            WriteUnifiedLog(LogLevelKind.Warning, "RiskControl",
+                $"Event=RiskControlRetry Stage={NormalizeStageKey(stageOptions.StageKey)} NodePath={runtime.Path} Attempt={attempt} DelayMs={delayMilliseconds} StatusCode={(int)response.StatusCode}");
+            response.Dispose();
+            await Task.Delay(delayMilliseconds, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     ///     执行网络请求。
     /// </summary>
     /// <param name="request">请求对象。</param>
@@ -819,12 +989,13 @@ public sealed class LumaEngine<TState>
         var effectiveRouteKind = ResolveRouteKind(request.RouteKind, context.DefaultRouteKind);
         var netRouteKind = effectiveRouteKind == LumaRouteKind.Proxy ? NetRouteKind.Proxy : NetRouteKind.Direct;
         await using var lease = await _netClient.RentAsync(netRouteKind, cancellationToken).ConfigureAwait(false);
+        var requestMessage = await CloneHttpRequestMessageAsync(request.HttpRequestMessage, cancellationToken).ConfigureAwait(false);
         using var timeoutCancellationTokenSource = CreateTimeoutCancellationTokenSource(request, cancellationToken);
         var effectiveCancellationToken = timeoutCancellationTokenSource?.Token ?? cancellationToken;
 
         try
         {
-            return await lease.HttpClient.SendAsync(request.HttpRequestMessage, HttpCompletionOption.ResponseHeadersRead, effectiveCancellationToken).ConfigureAwait(false);
+            return await lease.HttpClient.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, effectiveCancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (effectiveCancellationToken.IsCancellationRequested)
         {
@@ -832,10 +1003,51 @@ public sealed class LumaEngine<TState>
         }
         catch (Exception exception) when (exception is HttpRequestException or WebException)
         {
-            var failedResponse = new HttpResponseMessage((HttpStatusCode)599) { RequestMessage = request.HttpRequestMessage, ReasonPhrase = exception.Message, Content = new ByteArrayContent([]) };
+            var failedResponse = new HttpResponseMessage((HttpStatusCode)599) { RequestMessage = requestMessage, ReasonPhrase = exception.Message, Content = new ByteArrayContent([]) };
             failedResponse.Headers.TryAddWithoutValidation("X-Luma-Transport-Error", exception.GetType().Name);
             return failedResponse;
         }
+    }
+
+    /// <summary>
+    ///     克隆 HTTP 请求消息，确保请求可安全重发。
+    /// </summary>
+    /// <param name="requestMessage">源请求消息。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>克隆后的请求消息。</returns>
+    private static async ValueTask<HttpRequestMessage> CloneHttpRequestMessageAsync(HttpRequestMessage requestMessage, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(requestMessage);
+
+        var clone = new HttpRequestMessage(requestMessage.Method, requestMessage.RequestUri)
+        {
+            Version = requestMessage.Version,
+            VersionPolicy = requestMessage.VersionPolicy
+        };
+
+        foreach (var header in requestMessage.Headers)
+        {
+            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        if (requestMessage.Content is not null)
+        {
+            if (!requestMessage.Options.TryGetValue(CachedRequestContentBytesOptionKey, out var bytes))
+            {
+                bytes = await requestMessage.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+                requestMessage.Options.Set(CachedRequestContentBytesOptionKey, bytes);
+            }
+
+            var clonedContent = new ByteArrayContent(bytes);
+            foreach (var contentHeader in requestMessage.Content.Headers)
+            {
+                clonedContent.Headers.TryAddWithoutValidation(contentHeader.Key, contentHeader.Value);
+            }
+
+            clone.Content = clonedContent;
+        }
+
+        return clone;
     }
 
     /// <summary>
@@ -843,11 +1055,13 @@ public sealed class LumaEngine<TState>
     /// </summary>
     /// <param name="request">源请求。</param>
     /// <param name="nodePath">节点路径。</param>
+    /// <param name="stageKey">阶段键。</param>
     /// <returns>归一化请求。</returns>
-    private static LumaRequest NormalizeRequest(LumaRequest request, string nodePath)
+    private static LumaRequest NormalizeRequest(LumaRequest request, string nodePath, string stageKey)
     {
         return new LumaRequest(request.HttpRequestMessage, nodePath)
         {
+            StageKey = stageKey,
             RouteKind = request.RouteKind,
             Timeout = request.Timeout
         };
@@ -880,7 +1094,7 @@ public sealed class LumaEngine<TState>
     {
         ArgumentNullException.ThrowIfNull(runtime);
 
-        var options = runtime.Node.ResolveFlowControlOptions(runtime.Context);
+        var options = runtime.ExecutionProfile.FlowControlOptions;
         if (options.MinIntervalMilliseconds <= 0)
         {
             return ValueTask.FromResult<NodeTypeRequestFlowController?>(null);
@@ -904,6 +1118,231 @@ public sealed class LumaEngine<TState>
         controller.Update(options.ScopeName, options.MinIntervalMilliseconds, options.AdaptiveBackoffEnabled, options.AdaptiveBackoffStatusCodes, options.AdaptiveBackoffMaxHits, options.AdaptiveMaxIntervalMilliseconds,
             options.AdaptiveInitialIntervalMilliseconds, options.FlowControlStrategyKey);
         return ValueTask.FromResult<NodeTypeRequestFlowController?>(controller);
+    }
+
+    /// <summary>
+    ///     获取节点类型共享并发闸门租约。
+    /// </summary>
+    /// <param name="runtime">节点运行时。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>并发闸门租约；未限制时返回空租约。</returns>
+    private async ValueTask<IAsyncDisposable> AcquireNodeTypeConcurrencyLeaseAsync(LumaNodeRuntime<TState> runtime, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        var maxConcurrency = runtime.ExecutionProfile.ExecutionOptions.ResolveNodeTypeMaxConcurrency();
+        if (maxConcurrency <= 0)
+        {
+            return NoopAsyncDisposable.Instance;
+        }
+
+        var nodeType = runtime.Node.GetType();
+        var controller = _nodeTypeConcurrencyControllers.GetOrAdd(nodeType, _ => new NodeTypeConcurrencyController(maxConcurrency));
+        controller.Update(maxConcurrency);
+        return await controller.AcquireAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    ///     基于阶段配置执行带背压的普通请求入队。
+    /// </summary>
+    /// <param name="runtime">节点运行时。</param>
+    /// <param name="request">请求对象。</param>
+    /// <param name="scheduler">请求调度器。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>异步任务。</returns>
+    private async ValueTask EnqueueRequestWithStageControlAsync(LumaNodeRuntime<TState> runtime, LumaRequest request, NodeTaskScheduler scheduler, CancellationToken cancellationToken)
+    {
+        var stageOptions = ResolveStageExecutionOptions(runtime);
+        await scheduler.EnqueueAsync(request, stageOptions.StageKey, stageOptions.RequestCapacity, stageOptions.RequestBackpressureMode, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    ///     基于阶段配置执行带背压的下载请求入队。
+    /// </summary>
+    /// <param name="runtime">节点运行时。</param>
+    /// <param name="request">请求对象。</param>
+    /// <param name="scheduler">下载调度器。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>异步任务。</returns>
+    private async ValueTask EnqueueDownloadWithStageControlAsync(LumaNodeRuntime<TState> runtime, LumaRequest request, NodeTaskScheduler scheduler, CancellationToken cancellationToken)
+    {
+        var stageOptions = ResolveStageExecutionOptions(runtime);
+        await scheduler.EnqueueAsync(request, stageOptions.StageKey, stageOptions.DownloadCapacity, stageOptions.DownloadBackpressureMode, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    ///     获取阶段并发闸门租约。
+    /// </summary>
+    /// <param name="runtime">节点运行时。</param>
+    /// <param name="isDownload">是否下载请求。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>租约。</returns>
+    private async ValueTask<IAsyncDisposable> AcquireStageConcurrencyLeaseAsync(LumaNodeRuntime<TState> runtime, bool isDownload, CancellationToken cancellationToken)
+    {
+        var stageOptions = ResolveStageExecutionOptions(runtime);
+        var stageKey = NormalizeStageKey(stageOptions.StageKey);
+        var maxConcurrency = isDownload ? stageOptions.DownloadConcurrency : stageOptions.RequestConcurrency;
+        if (maxConcurrency <= 0)
+        {
+            return NoopAsyncDisposable.Instance;
+        }
+
+        var gates = isDownload ? _stageDownloadConcurrencyGates : _stageRequestConcurrencyGates;
+        var controller = gates.GetOrAdd(stageKey, _ => new StageConcurrencyController(maxConcurrency));
+        controller.Update(maxConcurrency);
+        return await controller.AcquireAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    ///     规范化阶段键。
+    /// </summary>
+    /// <param name="stageKey">输入阶段键。</param>
+    /// <returns>规范化阶段键。</returns>
+    private static string NormalizeStageKey(string stageKey)
+    {
+        return string.IsNullOrWhiteSpace(stageKey) ? "default" : stageKey.Trim();
+    }
+
+    /// <summary>
+    ///     解析阶段执行选项（同一阶段键采用统一配置）。
+    /// </summary>
+    /// <param name="runtime">节点运行时。</param>
+    /// <returns>统一阶段执行选项。</returns>
+    private NodeStageExecutionOptions ResolveStageExecutionOptions(LumaNodeRuntime<TState> runtime)
+    {
+        var incoming = runtime.ExecutionProfile.StageOptions;
+        var normalized = NormalizeStageExecutionOptions(incoming);
+        var stageKey = NormalizeStageKey(normalized.StageKey);
+        return _stageExecutionOptionsCatalog.AddOrUpdate(
+            stageKey,
+            _ => normalized,
+            (_, existing) => MergeStageExecutionOptions(existing, normalized));
+    }
+
+    /// <summary>
+    ///     标准化阶段执行选项。
+    /// </summary>
+    /// <param name="options">原始选项。</param>
+    /// <returns>标准化选项。</returns>
+    private static NodeStageExecutionOptions NormalizeStageExecutionOptions(NodeStageExecutionOptions options)
+    {
+        return new NodeStageExecutionOptions
+        {
+            StageKey = NormalizeStageKey(options.StageKey),
+            RequestCapacity = Math.Max(1, options.RequestCapacity),
+            DownloadCapacity = Math.Max(1, options.DownloadCapacity),
+            RequestConcurrency = Math.Max(0, options.RequestConcurrency),
+            DownloadConcurrency = Math.Max(0, options.DownloadConcurrency),
+            RequestBackpressureMode = options.RequestBackpressureMode,
+            DownloadBackpressureMode = options.DownloadBackpressureMode,
+            MinRequestIntervalMilliseconds = Math.Max(0, options.MinRequestIntervalMilliseconds),
+            RiskControlInitialDelayMilliseconds = Math.Max(1, options.RiskControlInitialDelayMilliseconds),
+            RiskControlMaxDelayMilliseconds = Math.Max(Math.Max(1, options.RiskControlInitialDelayMilliseconds), options.RiskControlMaxDelayMilliseconds),
+            RiskControlMaxRetries = Math.Max(0, options.RiskControlMaxRetries),
+            RiskControlStatusCodes = options.RiskControlStatusCodes.Count > 0 ? options.RiskControlStatusCodes : [429, 503]
+        };
+    }
+
+    /// <summary>
+    ///     合并同阶段键执行选项。
+    /// </summary>
+    /// <param name="existing">已存在选项。</param>
+    /// <param name="incoming">新选项。</param>
+    /// <returns>合并后的选项。</returns>
+    private static NodeStageExecutionOptions MergeStageExecutionOptions(NodeStageExecutionOptions existing, NodeStageExecutionOptions incoming)
+    {
+        return new NodeStageExecutionOptions
+        {
+            StageKey = existing.StageKey,
+            RequestCapacity = existing.RequestCapacity,
+            DownloadCapacity = existing.DownloadCapacity,
+            RequestConcurrency = ResolveStageConcurrency(existing.RequestConcurrency, incoming.RequestConcurrency),
+            DownloadConcurrency = ResolveStageConcurrency(existing.DownloadConcurrency, incoming.DownloadConcurrency),
+            RequestBackpressureMode = existing.RequestBackpressureMode,
+            DownloadBackpressureMode = existing.DownloadBackpressureMode,
+            MinRequestIntervalMilliseconds = Math.Max(existing.MinRequestIntervalMilliseconds, incoming.MinRequestIntervalMilliseconds),
+            RiskControlInitialDelayMilliseconds = Math.Max(existing.RiskControlInitialDelayMilliseconds, incoming.RiskControlInitialDelayMilliseconds),
+            RiskControlMaxDelayMilliseconds = Math.Max(existing.RiskControlMaxDelayMilliseconds, incoming.RiskControlMaxDelayMilliseconds),
+            RiskControlMaxRetries = Math.Max(existing.RiskControlMaxRetries, incoming.RiskControlMaxRetries),
+            RiskControlStatusCodes = existing.RiskControlStatusCodes.Concat(incoming.RiskControlStatusCodes).Distinct().OrderBy(static code => code).ToArray()
+        };
+    }
+
+    /// <summary>
+    ///     解析阶段并发度。
+    /// </summary>
+    /// <param name="left">并发度左值。</param>
+    /// <param name="right">并发度右值。</param>
+    /// <returns>合并并发度。</returns>
+    private static int ResolveStageConcurrency(int left, int right)
+    {
+        if (left <= 0 || right <= 0)
+        {
+            return 0;
+        }
+
+        return Math.Max(left, right);
+    }
+
+    /// <summary>
+    ///     判断状态码是否应触发风控重试。
+    /// </summary>
+    /// <param name="statusCode">状态码。</param>
+    /// <param name="retryStatusCodes">重试状态码集合。</param>
+    /// <returns>应重试返回 true。</returns>
+    private static bool ShouldRiskRetry(HttpStatusCode statusCode, IReadOnlyList<int>? retryStatusCodes)
+    {
+        if (retryStatusCodes is null)
+        {
+            return false;
+        }
+
+        var code = (int)statusCode;
+        foreach (var retryCode in retryStatusCodes)
+        {
+            if (retryCode == code)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    ///     计算风控重试延迟（指数递增）。
+    /// </summary>
+    /// <param name="initialDelayMilliseconds">起始延迟。</param>
+    /// <param name="maxDelayMilliseconds">最大延迟。</param>
+    /// <param name="attempt">重试次数（从 1 开始）。</param>
+    /// <returns>延迟毫秒数。</returns>
+    private static int ComputeRiskRetryDelayMilliseconds(int initialDelayMilliseconds, int maxDelayMilliseconds, int attempt)
+    {
+        if (attempt <= 1)
+        {
+            return initialDelayMilliseconds;
+        }
+
+        var multiplied = (long)initialDelayMilliseconds * (1L << Math.Min(30, attempt - 1));
+        return (int)Math.Min(maxDelayMilliseconds, Math.Min(int.MaxValue, multiplied));
+    }
+
+    /// <summary>
+    ///     创建阶段最小请求间隔限流器。
+    /// </summary>
+    /// <param name="minIntervalMilliseconds">最小请求间隔毫秒数。</param>
+    /// <returns>速率限制器。</returns>
+    private static RateLimiter CreateMinIntervalLimiter(int minIntervalMilliseconds)
+    {
+        var normalized = Math.Max(1, minIntervalMilliseconds);
+        return new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
+        {
+            TokenLimit = 1,
+            TokensPerPeriod = 1,
+            ReplenishmentPeriod = TimeSpan.FromMilliseconds(normalized),
+            QueueLimit = int.MaxValue,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            AutoReplenishment = true
+        });
     }
 
     /// <summary>
@@ -1233,8 +1672,8 @@ public sealed class LumaEngine<TState>
         }
 
         return _nodeRuntimes.Values.All(static runtime =>
-            runtime is { State: { ActiveRequestCount: <= 0, QueuedRequestCount: <= 0 }, RegisteringChildCount: <= 0, InitializingCount: <= 0, PendingChildSubtreeCount: <= 0, PendingChildRegistrationCount: <= 0 } &&
-            !runtime.IsExpansionPumpRunning);
+            runtime is { State: { ActiveRequestCount: <= 0, QueuedRequestCount: <= 0 }, RegisteringChildCount: <= 0, InitializingCount: <= 0, PendingChildSubtreeCount: <= 0 } &&
+            runtime.State.Status is not NodeExecutionStatus.Pending);
     }
 
     /// <summary>
@@ -1429,7 +1868,7 @@ public sealed class LumaEngine<TState>
         WriteUnifiedLog(
             isCritical ? LogLevelKind.Warning : LogLevelKind.Information,
             "Scheduler",
-            $"Event=ChildSlotWaitSlow ParentNodePath={parentRuntime.Path} ChildIndex={childIndex} WaitMs={waitMilliseconds} ParentRegisteringChildCount={parentRuntime.RegisteringChildCount} ParentPendingChildRegistrationCount={parentRuntime.PendingChildRegistrationCount} ParentPendingChildSubtreeCount={parentRuntime.PendingChildSubtreeCount} RequestQueueCount={requestScheduler.Count} ActiveNetworkCount={Interlocked.Read(ref _activeNetworkCount)}");
+            $"Event=ChildSlotWaitSlow ParentNodePath={parentRuntime.Path} ChildIndex={childIndex} WaitMs={waitMilliseconds} ParentRegisteringChildCount={parentRuntime.RegisteringChildCount} ParentPendingChildSubtreeCount={parentRuntime.PendingChildSubtreeCount} RequestQueueCount={requestScheduler.Count} ActiveNetworkCount={Interlocked.Read(ref _activeNetworkCount)}");
     }
 
     /// <summary>
@@ -1660,22 +2099,12 @@ public sealed class LumaEngine<TState>
         private readonly Func<string?, INodeRequestFlowControlStrategy> _strategyResolver;
 
         /// <summary>
-        ///     同步锁对象。
-        /// </summary>
-        private readonly Lock _syncRoot = new();
-
-        /// <summary>
         ///     时间提供器。
         /// </summary>
         private readonly TimeProvider _timeProvider;
 
         /// <summary>
-        ///     下一次允许请求的 UTC 时间戳（毫秒）。
-        /// </summary>
-        private long _nextAllowedUtcMilliseconds;
-
-        /// <summary>
-        ///     当前流控策略实例。
+        ///     当前策略实例。
         /// </summary>
         private INodeRequestFlowControlStrategy _strategy;
 
@@ -1683,6 +2112,16 @@ public sealed class LumaEngine<TState>
         ///     当前策略键。
         /// </summary>
         private string _strategyKey;
+
+        /// <summary>
+        ///     当前请求速率限制器。
+        /// </summary>
+        private RateLimiter _rateLimiter;
+
+        /// <summary>
+        ///     当前最小间隔（毫秒）。
+        /// </summary>
+        private int _configuredMinIntervalMilliseconds;
 
         /// <summary>
         ///     初始化节点类型请求流控器。
@@ -1717,6 +2156,7 @@ public sealed class LumaEngine<TState>
             var resolvedScopeName = string.IsNullOrWhiteSpace(scopeName) ? nodeType.Name : scopeName.Trim();
             _strategyKey = ResolveStrategyKey(flowControlStrategyKey);
             _strategy = _strategyResolver(_strategyKey);
+            _configuredMinIntervalMilliseconds = Math.Max(0, configuredMinIntervalMilliseconds);
             _strategy.Update(new NodeRequestFlowControlStrategyOptions(
                 resolvedScopeName,
                 configuredMinIntervalMilliseconds,
@@ -1725,6 +2165,7 @@ public sealed class LumaEngine<TState>
                 adaptiveBackoffMaxHits,
                 adaptiveMaxIntervalMilliseconds,
                 adaptiveInitialIntervalMilliseconds));
+            _rateLimiter = CreateRateLimiter(_configuredMinIntervalMilliseconds);
         }
 
         /// <summary>
@@ -1748,23 +2189,30 @@ public sealed class LumaEngine<TState>
             int adaptiveInitialIntervalMilliseconds,
             string? flowControlStrategyKey)
         {
-            lock (_syncRoot)
+            var resolvedStrategyKey = ResolveStrategyKey(flowControlStrategyKey);
+            var nextStrategy = _strategy;
+            if (!string.Equals(_strategyKey, resolvedStrategyKey, StringComparison.OrdinalIgnoreCase))
             {
-                var resolvedStrategyKey = ResolveStrategyKey(flowControlStrategyKey);
-                if (!string.Equals(_strategyKey, resolvedStrategyKey, StringComparison.OrdinalIgnoreCase))
-                {
-                    _strategyKey = resolvedStrategyKey;
-                    _strategy = _strategyResolver(resolvedStrategyKey);
-                }
+                nextStrategy = _strategyResolver(resolvedStrategyKey);
+                _strategyKey = resolvedStrategyKey;
+                Volatile.Write(ref _strategy, nextStrategy);
+            }
 
-                _strategy.Update(new NodeRequestFlowControlStrategyOptions(
-                    scopeName,
-                    configuredMinIntervalMilliseconds,
-                    adaptiveBackoffEnabled,
-                    adaptiveBackoffStatusCodes,
-                    adaptiveBackoffMaxHits,
-                    adaptiveMaxIntervalMilliseconds,
-                    adaptiveInitialIntervalMilliseconds));
+            nextStrategy.Update(new NodeRequestFlowControlStrategyOptions(
+                scopeName,
+                configuredMinIntervalMilliseconds,
+                adaptiveBackoffEnabled,
+                adaptiveBackoffStatusCodes,
+                adaptiveBackoffMaxHits,
+                adaptiveMaxIntervalMilliseconds,
+                adaptiveInitialIntervalMilliseconds));
+
+            var nextMinIntervalMilliseconds = Math.Max(0, configuredMinIntervalMilliseconds);
+            if (nextMinIntervalMilliseconds != Volatile.Read(ref _configuredMinIntervalMilliseconds))
+            {
+                var previous = Interlocked.Exchange(ref _rateLimiter, CreateRateLimiter(nextMinIntervalMilliseconds));
+                Interlocked.Exchange(ref _configuredMinIntervalMilliseconds, nextMinIntervalMilliseconds);
+                previous.Dispose();
             }
         }
 
@@ -1775,35 +2223,16 @@ public sealed class LumaEngine<TState>
         /// <returns>异步任务。</returns>
         public async ValueTask WaitTurnAsync(CancellationToken cancellationToken)
         {
-            while (true)
+            var effectiveMinIntervalMilliseconds = Volatile.Read(ref _strategy).ResolveEffectiveMinIntervalMilliseconds();
+            if (effectiveMinIntervalMilliseconds <= 0)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                int waitMilliseconds;
-                lock (_syncRoot)
-                {
-                    var effectiveMinIntervalMilliseconds = _strategy.ResolveEffectiveMinIntervalMilliseconds();
-                    if (effectiveMinIntervalMilliseconds <= 0)
-                    {
-                        _nextAllowedUtcMilliseconds = 0;
-                        return;
-                    }
+                return;
+            }
 
-                    var nowUtcMilliseconds = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
-                    if (nowUtcMilliseconds >= _nextAllowedUtcMilliseconds)
-                    {
-                        _nextAllowedUtcMilliseconds = nowUtcMilliseconds + effectiveMinIntervalMilliseconds;
-                        return;
-                    }
-
-                    waitMilliseconds = checked((int)Math.Min(int.MaxValue, _nextAllowedUtcMilliseconds - nowUtcMilliseconds));
-                }
-
-                if (waitMilliseconds <= 0)
-                {
-                    continue;
-                }
-
-                await Task.Delay(waitMilliseconds, cancellationToken).ConfigureAwait(false);
+            using var lease = await Volatile.Read(ref _rateLimiter).AcquireAsync(1, cancellationToken).ConfigureAwait(false);
+            if (!lease.IsAcquired)
+            {
+                throw new OperationCanceledException("Rate limiter lease was not acquired.", cancellationToken);
             }
         }
 
@@ -1813,10 +2242,7 @@ public sealed class LumaEngine<TState>
         /// <param name="statusCode">响应状态码。</param>
         public void ObserveResponse(HttpStatusCode statusCode)
         {
-            lock (_syncRoot)
-            {
-                _strategy.ObserveResponse(statusCode, _timeProvider.GetUtcNow().ToUnixTimeMilliseconds());
-            }
+            Volatile.Read(ref _strategy).ObserveResponse(statusCode, _timeProvider.GetUtcNow().ToUnixTimeMilliseconds());
         }
 
         /// <summary>
@@ -1827,6 +2253,200 @@ public sealed class LumaEngine<TState>
         private static string ResolveStrategyKey(string? strategyKey)
         {
             return string.IsNullOrWhiteSpace(strategyKey) ? NodeRequestFlowControlStrategyRegistry.DefaultStrategyKey : strategyKey.Trim();
+        }
+
+        /// <summary>
+        ///     创建最小间隔速率限制器。
+        /// </summary>
+        /// <param name="minIntervalMilliseconds">最小请求间隔毫秒数。</param>
+        /// <returns>速率限制器。</returns>
+        private static RateLimiter CreateRateLimiter(int minIntervalMilliseconds)
+        {
+            var normalized = Math.Max(1, minIntervalMilliseconds);
+            return new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
+            {
+                TokenLimit = 1,
+                TokensPerPeriod = 1,
+                ReplenishmentPeriod = TimeSpan.FromMilliseconds(normalized),
+                QueueLimit = int.MaxValue,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                AutoReplenishment = true
+            });
+        }
+    }
+
+    /// <summary>
+    ///     节点类型并发闸门控制器。
+    /// </summary>
+    private sealed class NodeTypeConcurrencyController
+    {
+        /// <summary>
+        ///     并发闸门信号量。
+        /// </summary>
+        private readonly SemaphoreSlim _semaphore;
+
+        /// <summary>
+        ///     当前配置的最大并发度。
+        /// </summary>
+        private int _configuredMaxConcurrency;
+
+        /// <summary>
+        ///     初始化并发闸门控制器。
+        /// </summary>
+        /// <param name="maxConcurrency">最大并发度。</param>
+        public NodeTypeConcurrencyController(int maxConcurrency)
+        {
+            _configuredMaxConcurrency = Math.Max(1, maxConcurrency);
+            _semaphore = new SemaphoreSlim(_configuredMaxConcurrency, int.MaxValue);
+        }
+
+        /// <summary>
+        ///     更新最大并发度（仅支持升高上限）。
+        /// </summary>
+        /// <param name="maxConcurrency">最大并发度。</param>
+        public void Update(int maxConcurrency)
+        {
+            var next = Math.Max(1, maxConcurrency);
+            var current = Volatile.Read(ref _configuredMaxConcurrency);
+            if (next <= current)
+            {
+                return;
+            }
+
+            Interlocked.Exchange(ref _configuredMaxConcurrency, next);
+            _semaphore.Release(next - current);
+        }
+
+        /// <summary>
+        ///     获取并发租约。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>租约对象。</returns>
+        public async ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken)
+        {
+            await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return new SemaphoreLease(_semaphore);
+        }
+    }
+
+    /// <summary>
+    ///     阶段并发闸门控制器。
+    /// </summary>
+    private sealed class StageConcurrencyController : IDisposable
+    {
+        /// <summary>
+        ///     并发闸门信号量。
+        /// </summary>
+        private readonly SemaphoreSlim _semaphore;
+
+        /// <summary>
+        ///     当前配置并发上限。
+        /// </summary>
+        private int _configuredMaxConcurrency;
+
+        /// <summary>
+        ///     初始化阶段并发闸门控制器。
+        /// </summary>
+        /// <param name="maxConcurrency">并发上限。</param>
+        public StageConcurrencyController(int maxConcurrency)
+        {
+            _configuredMaxConcurrency = Math.Max(1, maxConcurrency);
+            _semaphore = new SemaphoreSlim(_configuredMaxConcurrency, int.MaxValue);
+        }
+
+        /// <summary>
+        ///     更新并发上限（仅支持提升上限）。
+        /// </summary>
+        /// <param name="maxConcurrency">并发上限。</param>
+        public void Update(int maxConcurrency)
+        {
+            var next = Math.Max(1, maxConcurrency);
+            var current = Volatile.Read(ref _configuredMaxConcurrency);
+            if (next <= current)
+            {
+                return;
+            }
+
+            Interlocked.Exchange(ref _configuredMaxConcurrency, next);
+            _semaphore.Release(next - current);
+        }
+
+        /// <summary>
+        ///     获取并发租约。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>租约。</returns>
+        public async ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken)
+        {
+            await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return new SemaphoreLease(_semaphore);
+        }
+
+        /// <summary>
+        ///     释放资源。
+        /// </summary>
+        public void Dispose()
+        {
+            _semaphore.Dispose();
+        }
+    }
+
+    /// <summary>
+    ///     空异步释放器。
+    /// </summary>
+    private sealed class NoopAsyncDisposable : IAsyncDisposable
+    {
+        /// <summary>
+        ///     单例实例。
+        /// </summary>
+        public static NoopAsyncDisposable Instance { get; } = new();
+
+        /// <summary>
+        ///     释放空资源。
+        /// </summary>
+        /// <returns>已完成任务。</returns>
+        public ValueTask DisposeAsync()
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    ///     信号量租约。
+    /// </summary>
+    private sealed class SemaphoreLease : IAsyncDisposable
+    {
+        /// <summary>
+        ///     信号量实例。
+        /// </summary>
+        private readonly SemaphoreSlim _semaphore;
+
+        /// <summary>
+        ///     是否已释放。
+        /// </summary>
+        private int _disposed;
+
+        /// <summary>
+        ///     初始化信号量租约。
+        /// </summary>
+        /// <param name="semaphore">信号量实例。</param>
+        public SemaphoreLease(SemaphoreSlim semaphore)
+        {
+            _semaphore = semaphore ?? throw new ArgumentNullException(nameof(semaphore));
+        }
+
+        /// <summary>
+        ///     释放租约并归还并发槽位。
+        /// </summary>
+        /// <returns>已完成任务。</returns>
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                _semaphore.Release();
+            }
+
+            return ValueTask.CompletedTask;
         }
     }
 

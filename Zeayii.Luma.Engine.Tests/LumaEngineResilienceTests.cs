@@ -56,7 +56,10 @@ public sealed class LumaEngineResilienceTests
     [Fact]
     public async Task RunAsyncShouldNotLoseRequestsWhenRequestChannelIsFull()
     {
-        var node = new MultiRequestNode("root", Enumerable.Range(1, 20).Select(index => $"https://example.com/request/{index}").ToArray());
+        var children = Enumerable.Range(1, 20)
+            .Select(index => (LumaNode<TestState>)new SingleItemNode($"child-{index}", $"https://example.com/request/{index}", new TestItem($"item-{index}")))
+            .ToArray();
+        var node = new ParentNode("root", new NodeExecutionOptions(LumaRouteKind.Auto, 20), children);
         var fixture = CreateFixture(
             new LumaEngineOptions
             {

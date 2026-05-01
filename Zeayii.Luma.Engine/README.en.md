@@ -41,9 +41,9 @@ sequenceDiagram
 
 ## Scheduling Semantics
 
-1. Nodes declare child expansion concurrency limits.
-2. Engine expands children with structured concurrency semantics.
-3. Engine enforces global concurrency and queue backpressure.
+1. Nodes declare stage key, stage capacity, stage concurrency, and backpressure mode via `NodeExecutionProfile.StageOptions`.
+2. Engine applies request/download queueing and concurrency by stage without hardcoding provider-specific stage names.
+3. Engine enforces node-type concurrency, stage minimum request interval, and risk-control retry policy.
 
 ## Consumer Guidance
 

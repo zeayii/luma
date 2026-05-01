@@ -73,6 +73,11 @@ internal sealed class CommonCommandOptionSet
     public required Option<int> RefreshIntervalMillisecondsOption { get; init; }
 
     /// <summary>
+    ///     请求工作协程数量参数。
+    /// </summary>
+    public required Option<int> RequestWorkerCountOption { get; init; }
+
+    /// <summary>
     ///     下载工作协程数量参数。
     /// </summary>
     public required Option<int> DownloadWorkerCountOption { get; init; }
@@ -86,6 +91,11 @@ internal sealed class CommonCommandOptionSet
     ///     请求通道容量参数。
     /// </summary>
     public required Option<int> RequestChannelCapacityOption { get; init; }
+
+    /// <summary>
+    ///     下载通道容量参数。
+    /// </summary>
+    public required Option<int> DownloadChannelCapacityOption { get; init; }
 
     /// <summary>
     ///     持久化通道容量参数。

@@ -50,14 +50,20 @@
 - `Items`
 - `StopNode` / `StopReason`
 
-2. `NodeExecutionOptions`
-- `ChildMaxConcurrency`
+2. `NodeExecutionProfile`
+- `StageOptions`
+- `ExecutionOptions`
+- `FlowControlOptions`
 
-3. `LumaContext<TState>`
+3. `NodeExecutionOptions`
+- `ChildMaxConcurrency`
+- `NodeTypeMaxConcurrency`
+
+4. `LumaContext<TState>`
 - 运行元信息（RunId、RunName、Path、Depth）
 - 资源能力函数（例如 HTML 解析、Cookie 读写）
 - `CancellationToken`
-4. `NodeExecutionOptions.DefaultRouteKind`
+5. `NodeExecutionOptions.DefaultRouteKind`
 - 节点默认路由类型。
 - 请求与 Cookie 操作在未显式覆盖时优先采用节点默认路由。
 
@@ -89,9 +95,12 @@ sequenceDiagram
 ## 6. 调度与并发策略
 
 1. 全局并发由引擎统一控制。
-2. 子节点并发由节点 `ChildMaxConcurrency` 声明。
-3. 子节点扩展并发由节点 `ChildMaxConcurrency` 声明。
-4. 队列背压由调度器实现，避免无限入队。
+2. 阶段并发由 `NodeExecutionProfile.StageOptions` 声明（请求并发/下载并发）。
+3. 阶段队列容量与背压模式由 `NodeExecutionProfile.StageOptions` 声明。
+4. 阶段最小请求间隔与风控重试（起始延迟、最大延迟、最大重试次数）由 `NodeExecutionProfile.StageOptions` 声明。
+5. 子节点扩展并发由 `NodeExecutionProfile.ExecutionOptions.ChildMaxConcurrency` 声明。
+6. 同类型节点请求并发由 `NodeExecutionProfile.ExecutionOptions.NodeTypeMaxConcurrency` 声明（小于等于 0 表示不限制）。
+7. 同类型节点请求最小间隔与自适应退避由 `NodeExecutionProfile.FlowControlOptions` 声明。
 
 ## 7. 设计约束
 

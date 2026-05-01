@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Zeayii.Luma.Abstractions.Abstractions;
 using Zeayii.Luma.Abstractions.Models;
-using System.Threading.Channels;
 
 namespace Zeayii.Luma.Engine.Runtime;
 
@@ -47,29 +46,14 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     private long _registeringChildCount;
 
     /// <summary>
+    ///     已派发但尚未完成的子节点注册任务数量。
+    /// </summary>
+    private long _pendingChildRegistrationTaskCount;
+
+    /// <summary>
     ///     子树完成标记。
     /// </summary>
     private int _subtreeCompleted;
-
-    /// <summary>
-    ///     待注册子节点通道。
-    /// </summary>
-    private readonly Channel<NodeChildBinding<TState>> _pendingChildRegistrationChannel = Channel.CreateUnbounded<NodeChildBinding<TState>>(new UnboundedChannelOptions
-    {
-        SingleReader = true,
-        SingleWriter = false,
-        AllowSynchronousContinuations = false
-    });
-
-    /// <summary>
-    ///     待注册子节点数量。
-    /// </summary>
-    private long _pendingChildRegistrationCount;
-
-    /// <summary>
-    ///     扩展泵运行标记。
-    /// </summary>
-    private int _expansionPumpRunning;
 
     /// <summary>
     ///     初始化节点运行时。
@@ -84,6 +68,7 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     /// <param name="htmlParser">HTML 解析器。</param>
     /// <param name="cookieAccessor">Cookie 访问器。</param>
     /// <param name="loggerFactory">日志工厂。</param>
+    /// <param name="executionProfile">节点执行画像。</param>
     /// <param name="parentToken">父级取消令牌。</param>
     public LumaNodeRuntime(
         LumaNode<TState> node,
@@ -96,9 +81,11 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
         IHtmlParser htmlParser,
         ICookieAccessor cookieAccessor,
         ILoggerFactory loggerFactory,
+        NodeExecutionProfile executionProfile,
         CancellationToken parentToken)
     {
         Node = node ?? throw new ArgumentNullException(nameof(node));
+        ExecutionProfile = executionProfile ?? throw new ArgumentNullException(nameof(executionProfile));
         Path = string.IsNullOrWhiteSpace(path) ? throw new ArgumentNullException(nameof(path)) : path;
         Depth = depth;
         CancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(parentToken);
@@ -108,20 +95,25 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
             commandName,
             Path,
             Depth,
-            node.ExecutionOptions.DefaultRouteKind,
+            ExecutionProfile.ExecutionOptions.DefaultRouteKind,
             state,
             htmlParser ?? throw new ArgumentNullException(nameof(htmlParser)),
             cookieAccessor ?? throw new ArgumentNullException(nameof(cookieAccessor)),
             (loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory))).CreateLogger(node.GetType()),
             CancellationTokenSource.Token);
         State = new LumaNodeState();
-        _childConcurrencyGate = new SemaphoreSlim(Node.ExecutionOptions.ResolveChildMaxConcurrency());
+        _childConcurrencyGate = new SemaphoreSlim(ExecutionProfile.ExecutionOptions.ResolveChildMaxConcurrency());
     }
 
     /// <summary>
     ///     抽象层节点。
     /// </summary>
     public LumaNode<TState> Node { get; }
+
+    /// <summary>
+    ///     节点执行画像。
+    /// </summary>
+    public NodeExecutionProfile ExecutionProfile { get; }
 
     /// <summary>
     ///     节点路径。
@@ -159,6 +151,11 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     public long RegisteringChildCount => Interlocked.Read(ref _registeringChildCount);
 
     /// <summary>
+    ///     待完成子节点注册任务数量。
+    /// </summary>
+    public long PendingChildRegistrationTaskCount => Interlocked.Read(ref _pendingChildRegistrationTaskCount);
+
+    /// <summary>
     ///     节点初始化中的数量。
     /// </summary>
     public long InitializingCount => Interlocked.Read(ref _initializingCount);
@@ -167,16 +164,6 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     ///     子树中待完成的直接子节点数量。
     /// </summary>
     public long PendingChildSubtreeCount => Interlocked.Read(ref _pendingChildSubtreeCount);
-
-    /// <summary>
-    ///     待注册子节点数量。
-    /// </summary>
-    public long PendingChildRegistrationCount => Interlocked.Read(ref _pendingChildRegistrationCount);
-
-    /// <summary>
-    ///     扩展泵是否运行中。
-    /// </summary>
-    public bool IsExpansionPumpRunning => Volatile.Read(ref _expansionPumpRunning) != 0;
 
     /// <summary>
     ///     释放运行时资源。
@@ -229,6 +216,22 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     }
 
     /// <summary>
+    ///     增加待完成子节点注册任务数量。
+    /// </summary>
+    public void IncrementPendingChildRegistrationTask()
+    {
+        Interlocked.Increment(ref _pendingChildRegistrationTaskCount);
+    }
+
+    /// <summary>
+    ///     减少待完成子节点注册任务数量。
+    /// </summary>
+    public void DecrementPendingChildRegistrationTask()
+    {
+        Interlocked.Decrement(ref _pendingChildRegistrationTaskCount);
+    }
+
+    /// <summary>
     ///     增加节点初始化中的数量。
     /// </summary>
     public void IncrementInitializing()
@@ -261,63 +264,6 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     }
 
     /// <summary>
-    ///     批量加入待注册子节点。
-    /// </summary>
-    /// <param name="children">子节点绑定集合。</param>
-    public void EnqueuePendingChildRegistrations(IReadOnlyList<NodeChildBinding<TState>> children)
-    {
-        ArgumentNullException.ThrowIfNull(children);
-        if (children.Count == 0)
-        {
-            return;
-        }
-
-        foreach (var child in children)
-        {
-            if (!_pendingChildRegistrationChannel.Writer.TryWrite(child))
-            {
-                throw new InvalidOperationException("Pending child registration channel rejected write unexpectedly.");
-            }
-        }
-
-        Interlocked.Add(ref _pendingChildRegistrationCount, children.Count);
-    }
-
-    /// <summary>
-    ///     尝试弹出一个待注册子节点。
-    /// </summary>
-    /// <param name="childBinding">子节点绑定。</param>
-    /// <returns>弹出成功返回 <c>true</c>。</returns>
-    public bool TryDequeuePendingChildRegistration(out NodeChildBinding<TState> childBinding)
-    {
-        if (_pendingChildRegistrationChannel.Reader.TryRead(out childBinding))
-        {
-            Interlocked.Decrement(ref _pendingChildRegistrationCount);
-            return true;
-        }
-
-        childBinding = default!;
-        return false;
-    }
-
-    /// <summary>
-    ///     尝试占有扩展泵执行权。
-    /// </summary>
-    /// <returns>占有成功返回 <c>true</c>。</returns>
-    public bool TryAcquireExpansionPump()
-    {
-        return Interlocked.CompareExchange(ref _expansionPumpRunning, 1, 0) == 0;
-    }
-
-    /// <summary>
-    ///     释放扩展泵执行权。
-    /// </summary>
-    public void ReleaseExpansionPump()
-    {
-        Interlocked.Exchange(ref _expansionPumpRunning, 0);
-    }
-
-    /// <summary>
     ///     尝试取消当前节点。
     /// </summary>
     /// <param name="reason">停止原因。</param>
@@ -344,9 +290,8 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
         if (State.ActiveRequestCount > 0 ||
             State.QueuedRequestCount > 0 ||
             RegisteringChildCount > 0 ||
+            PendingChildRegistrationTaskCount > 0 ||
             InitializingCount > 0 ||
-            PendingChildRegistrationCount > 0 ||
-            IsExpansionPumpRunning ||
             PendingChildSubtreeCount > 0 ||
             State.Status == NodeExecutionStatus.Pending)
         {

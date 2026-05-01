@@ -9,7 +9,7 @@ Zeayii.Luma 是一个面向站点抓取场景的 Node 驱动运行时框架。
 1. 用户只实现 Node，不实现请求调度器。
 2. `ISpider<TState>` 负责创建运行状态并提供根节点，不承载解析流程。
 3. 框架统一负责请求执行、并发控制、背压、持久化与观测。
-4. 节点通过声明式选项控制子节点遍历策略和并发上限。
+4. 节点通过执行画像声明子节点并发、同类型请求并发与流控策略。
 5. 持久化由框架统一执行，节点只决定是否持久化与持久化后回调。
 
 ## 2. 模块职责
@@ -39,10 +39,19 @@ Zeayii.Luma 是一个面向站点抓取场景的 Node 驱动运行时框架。
 - `ShouldPersistAsync`
 - `OnPersistedAsync`
 3. `NodeDispatchBatch`：节点阶段产出批次（`Requests` / `Children` / `Items` / 停止信号）。
-4. `NodeExecutionOptions`：
+4. `NodeExecutionProfile`：聚合 `ExecutionOptions` 与 `FlowControlOptions`。
+5. `NodeStageExecutionOptions`：
+- `StageKey`
+- `RequestCapacity` / `DownloadCapacity`
+- `RequestConcurrency` / `DownloadConcurrency`
+- `RequestBackpressureMode` / `DownloadBackpressureMode`
+- `MinRequestIntervalMilliseconds`
+- `RiskControlInitialDelayMilliseconds` / `RiskControlMaxDelayMilliseconds` / `RiskControlMaxRetries`
+6. `NodeExecutionOptions`：
 - `ChildMaxConcurrency`
-5. `LumaContext<TState>`：运行元信息 + 资源能力函数（如 HTML 解析、Cookie 读写）。
-6. `NodeExecutionOptions` 还包含 `DefaultRouteKind`，用于节点默认请求/会话路由。
+- `NodeTypeMaxConcurrency`
+- `DefaultRouteKind`
+7. `LumaContext<TState>`：运行元信息 + 资源能力函数（如 HTML 解析、Cookie 读写）。
 
 ## 4. 运行流程
 

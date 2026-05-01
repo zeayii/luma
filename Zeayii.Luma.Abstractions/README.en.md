@@ -11,7 +11,7 @@ This module defines the stable public contracts of Luma.
 3. Defines shared models:
 
 - `LumaRequest` (wrapping `HttpRequestMessage`) / `HttpResponseMessage`
-- `NodeDispatchBatch` / `NodeExecutionOptions`
+- `NodeDispatchBatch` / `NodeExecutionProfile` / `NodeStageExecutionOptions` / `NodeExecutionOptions`
 - `LumaContext<TState>` (Context exposes parsing and Cookie capability functions)
 - `PersistResult` / `PersistContext`
 
