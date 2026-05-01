@@ -155,6 +155,11 @@ public sealed class LumaEngine<TState>
     private const int PersistBatchSummarySampleEvery = 100;
 
     /// <summary>
+    ///     单次网络请求慢诊断阈值（毫秒）。
+    /// </summary>
+    private const int SlowNetworkRequestDiagnosticThresholdMilliseconds = 5000;
+
+    /// <summary>
     ///     当前活跃网络任务数量。
     /// </summary>
     private long _activeNetworkCount;
@@ -193,11 +198,6 @@ public sealed class LumaEngine<TState>
     ///     已成功持久化数量。
     /// </summary>
     private long _storedItemCount;
-
-    /// <summary>
-    ///     请求内容缓存键（用于重试期间复用缓冲内容）。
-    /// </summary>
-    private static readonly HttpRequestOptionsKey<byte[]> CachedRequestContentBytesOptionKey = new("luma.cached-request-content-bytes");
 
     /// <summary>
     ///     初始化引擎。
@@ -969,7 +969,38 @@ public sealed class LumaEngine<TState>
         {
             await WaitGlobalMinIntervalAsync(cancellationToken).ConfigureAwait(false);
             await WaitStageMinIntervalAsync(stageOptions, cancellationToken).ConfigureAwait(false);
-            var response = await SendAsync(request, runtime.Context, cancellationToken).ConfigureAwait(false);
+            var requestStopwatch = Stopwatch.StartNew();
+            HttpResponseMessage response;
+            try
+            {
+                response = await SendAsync(request, runtime.Context, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                WriteUnifiedLog(
+                    LogLevelKind.Debug,
+                    "Network",
+                    $"Event=RequestCanceledOrTimedOut Stage={NormalizeStageKey(stageOptions.StageKey)} NodePath={runtime.Path} Attempt={attempt} RequestUri={request.HttpRequestMessage.RequestUri} Timeout={request.Timeout?.TotalSeconds.ToString("0.###") ?? "(null)"} RouteKind={request.RouteKind}",
+                    exception);
+                throw;
+            }
+            finally
+            {
+                requestStopwatch.Stop();
+            }
+
+            if (requestStopwatch.ElapsedMilliseconds >= SlowNetworkRequestDiagnosticThresholdMilliseconds)
+            {
+                var responseRequestUri = response.RequestMessage?.RequestUri ?? request.HttpRequestMessage.RequestUri;
+                var transportError = response.Headers.TryGetValues("X-Luma-Transport-Error", out var transportErrorValues)
+                    ? string.Join(",", transportErrorValues)
+                    : "(none)";
+                WriteUnifiedLog(
+                    LogLevelKind.Debug,
+                    "Network",
+                    $"Event=RequestSlow Stage={NormalizeStageKey(stageOptions.StageKey)} NodePath={runtime.Path} Attempt={attempt} ElapsedMs={requestStopwatch.ElapsedMilliseconds} StatusCode={(int)response.StatusCode} RequestUri={responseRequestUri} RouteKind={request.RouteKind} Timeout={request.Timeout?.TotalSeconds.ToString("0.###") ?? "(null)"} TransportError={transportError}");
+            }
+
             if (!ShouldRiskRetry(response.StatusCode, retryStatusCodes) || attempt >= maxRetries)
             {
                 return response;
@@ -1037,22 +1068,24 @@ public sealed class LumaEngine<TState>
             clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
 
-        if (requestMessage.Content is not null)
+        if (requestMessage.Content is null)
         {
-            if (!requestMessage.Options.TryGetValue(CachedRequestContentBytesOptionKey, out var bytes))
-            {
-                bytes = await requestMessage.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-                requestMessage.Options.Set(CachedRequestContentBytesOptionKey, bytes);
-            }
-
-            var clonedContent = new ByteArrayContent(bytes);
-            foreach (var contentHeader in requestMessage.Content.Headers)
-            {
-                clonedContent.Headers.TryAddWithoutValidation(contentHeader.Key, contentHeader.Value);
-            }
-
-            clone.Content = clonedContent;
+            return clone;
         }
+
+        if (!requestMessage.Options.TryGetValue(LumaEngineRequestOptionKeys.CachedRequestContentBytesOptionKey, out var bytes))
+        {
+            bytes = await requestMessage.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+            requestMessage.Options.Set(LumaEngineRequestOptionKeys.CachedRequestContentBytesOptionKey, bytes);
+        }
+
+        var clonedContent = new ByteArrayContent(bytes);
+        foreach (var contentHeader in requestMessage.Content.Headers)
+        {
+            clonedContent.Headers.TryAddWithoutValidation(contentHeader.Key, contentHeader.Value);
+        }
+
+        clone.Content = clonedContent;
 
         return clone;
     }
@@ -1363,7 +1396,7 @@ public sealed class LumaEngine<TState>
             return initialDelayMilliseconds;
         }
 
-        var multiplied = (long)initialDelayMilliseconds * (1L << Math.Min(30, attempt - 1));
+        var multiplied = initialDelayMilliseconds * (1L << Math.Min(30, attempt - 1));
         return (int)Math.Min(maxDelayMilliseconds, Math.Min(int.MaxValue, multiplied));
     }
 
@@ -1663,6 +1696,16 @@ public sealed class LumaEngine<TState>
         {
             if (IsRunCompleted(requestScheduler, downloadScheduler))
             {
+                var runtimeCount = _nodeRuntimes.Count;
+                var runningRuntimeCount = _nodeRuntimes.Values.Count(static runtime => runtime.State.Status is NodeExecutionStatus.Running or NodeExecutionStatus.Stopping);
+                var pendingRegistrationCount = _nodeRuntimes.Values.Sum(static runtime => runtime.PendingChildRegistrationTaskCount);
+                var pendingSubtreeCount = _nodeRuntimes.Values.Sum(static runtime => runtime.PendingChildSubtreeCount);
+                var registeringChildCount = _nodeRuntimes.Values.Sum(static runtime => runtime.RegisteringChildCount);
+                WriteUnifiedLog(
+                    LogLevelKind.Debug,
+                    "Scheduler",
+                    $"Event=RunCompletionDetected RuntimeCount={runtimeCount} RunningRuntimeCount={runningRuntimeCount} RequestQueueCount={requestScheduler.Count} DownloadQueueCount={downloadScheduler.Count} ActiveNetworkCount={Interlocked.Read(ref _activeNetworkCount)} PendingRegistrationCount={pendingRegistrationCount} RegisteringChildCount={registeringChildCount} PendingSubtreeCount={pendingSubtreeCount}");
+
                 foreach (var runtime in _nodeRuntimes.Values)
                 {
                     if (runtime.State.Status is NodeExecutionStatus.Running or NodeExecutionStatus.Stopping)
@@ -1712,9 +1755,7 @@ public sealed class LumaEngine<TState>
             return false;
         }
 
-        return _nodeRuntimes.Values.All(static runtime =>
-            runtime is { State: { ActiveRequestCount: <= 0, QueuedRequestCount: <= 0 }, RegisteringChildCount: <= 0, InitializingCount: <= 0, PendingChildSubtreeCount: <= 0 } &&
-            runtime.State.Status is not NodeExecutionStatus.Pending);
+        return _nodeRuntimes.Values.All(static runtime => runtime is { State: { ActiveRequestCount: <= 0, QueuedRequestCount: <= 0, Status: not NodeExecutionStatus.Pending }, RegisteringChildCount: <= 0, InitializingCount: <= 0, PendingChildSubtreeCount: <= 0 });
     }
 
     /// <summary>
