@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Net;
 
 namespace Zeayii.Luma.Engine.FlowControl;
@@ -27,9 +28,9 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
     private const int CooldownMilliseconds = 30_000;
 
     /// <summary>
-    ///     是否启用自适应退避。
+    ///     是否启用自适应退避（1=启用，0=禁用）。
     /// </summary>
-    private bool _adaptiveBackoffEnabled;
+    private int _adaptiveBackoffEnabledFlag;
 
     /// <summary>
     ///     当前命中次数。
@@ -44,7 +45,7 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
     /// <summary>
     ///     触发自适应退避状态码集合。
     /// </summary>
-    private HashSet<int> _adaptiveBackoffStatusCodes = [];
+    private ImmutableHashSet<int> _adaptiveBackoffStatusCodes = ImmutableHashSet<int>.Empty;
 
     /// <summary>
     ///     自适应退避上限（毫秒）。
@@ -84,40 +85,46 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
     /// <inheritdoc />
     public void Update(NodeRequestFlowControlStrategyOptions options)
     {
-        _configuredMinIntervalMilliseconds = options.ResolveMinIntervalMilliseconds();
-        _adaptiveBackoffEnabled = options.AdaptiveBackoffEnabled;
-        _adaptiveBackoffStatusCodes = options.BuildAdaptiveBackoffStatusCodeSet();
-        _adaptiveBackoffMaxHits = options.ResolveAdaptiveBackoffMaxHits();
-        _adaptiveMaxIntervalMilliseconds = Math.Max(0, options.AdaptiveMaxIntervalMilliseconds);
-        _adaptiveInitialIntervalMilliseconds = options.ResolveAdaptiveInitialIntervalMilliseconds();
+        var configuredMinIntervalMilliseconds = options.ResolveMinIntervalMilliseconds();
+        var adaptiveBackoffEnabledFlag = options.AdaptiveBackoffEnabled ? 1 : 0;
+        var adaptiveBackoffMaxHits = options.ResolveAdaptiveBackoffMaxHits();
+        var adaptiveMaxIntervalMilliseconds = Math.Max(0, options.AdaptiveMaxIntervalMilliseconds);
+        var adaptiveInitialIntervalMilliseconds = options.ResolveAdaptiveInitialIntervalMilliseconds();
+        var adaptiveBackoffStatusCodes = options.BuildAdaptiveBackoffStatusCodeSet().ToImmutableHashSet();
 
-        if (_adaptiveMinIntervalMilliseconds < _configuredMinIntervalMilliseconds)
-        {
-            _adaptiveMinIntervalMilliseconds = _configuredMinIntervalMilliseconds;
-        }
+        Interlocked.Exchange(ref _configuredMinIntervalMilliseconds, configuredMinIntervalMilliseconds);
+        Interlocked.Exchange(ref _adaptiveBackoffEnabledFlag, adaptiveBackoffEnabledFlag);
+        Interlocked.Exchange(ref _adaptiveBackoffMaxHits, adaptiveBackoffMaxHits);
+        Interlocked.Exchange(ref _adaptiveMaxIntervalMilliseconds, adaptiveMaxIntervalMilliseconds);
+        Interlocked.Exchange(ref _adaptiveInitialIntervalMilliseconds, adaptiveInitialIntervalMilliseconds);
+        Volatile.Write(ref _adaptiveBackoffStatusCodes, adaptiveBackoffStatusCodes);
 
-        if (_adaptiveBackoffMaxHits > 0 && _adaptiveBackoffHitCount > _adaptiveBackoffMaxHits)
-        {
-            _adaptiveBackoffHitCount = _adaptiveBackoffMaxHits;
-        }
+        EnsureAdaptiveFloor(configuredMinIntervalMilliseconds);
+        ClampAdaptiveHitCount(adaptiveBackoffMaxHits);
     }
 
     /// <inheritdoc />
     public int ResolveEffectiveMinIntervalMilliseconds()
     {
-        return Math.Max(_configuredMinIntervalMilliseconds, _adaptiveMinIntervalMilliseconds);
+        return Math.Max(Volatile.Read(ref _configuredMinIntervalMilliseconds), Volatile.Read(ref _adaptiveMinIntervalMilliseconds));
     }
 
     /// <inheritdoc />
     public void ObserveResponse(HttpStatusCode statusCode, long nowUtcMilliseconds)
     {
-        if (!_adaptiveBackoffEnabled || _adaptiveBackoffStatusCodes.Count == 0)
+        if (Volatile.Read(ref _adaptiveBackoffEnabledFlag) == 0)
+        {
+            return;
+        }
+
+        var adaptiveBackoffStatusCodes = Volatile.Read(ref _adaptiveBackoffStatusCodes);
+        if (adaptiveBackoffStatusCodes.IsEmpty)
         {
             return;
         }
 
         var statusCodeValue = (int)statusCode;
-        if (_adaptiveBackoffStatusCodes.Contains(statusCodeValue))
+        if (adaptiveBackoffStatusCodes.Contains(statusCodeValue))
         {
             ObserveBackoffTrigger(nowUtcMilliseconds);
             return;
@@ -135,34 +142,50 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
     /// <param name="nowUtcMilliseconds">当前 UTC 时间戳（毫秒）。</param>
     private void ObserveBackoffTrigger(long nowUtcMilliseconds)
     {
-        if (_adaptiveBackoffMaxHits > 0 && _adaptiveBackoffHitCount >= _adaptiveBackoffMaxHits)
+        var adaptiveBackoffMaxHits = Volatile.Read(ref _adaptiveBackoffMaxHits);
+        var adaptiveBackoffHitCount = Volatile.Read(ref _adaptiveBackoffHitCount);
+
+        if (adaptiveBackoffMaxHits > 0 && adaptiveBackoffHitCount >= adaptiveBackoffMaxHits)
         {
-            _probeWindowSuccessCount = 0;
-            _cooldownUntilUtcMilliseconds = nowUtcMilliseconds + CooldownMilliseconds;
+            Interlocked.Exchange(ref _probeWindowSuccessCount, 0);
+            Volatile.Write(ref _cooldownUntilUtcMilliseconds, nowUtcMilliseconds + CooldownMilliseconds);
             return;
         }
 
         var adaptiveCap = ResolveAdaptiveMaxIntervalMilliseconds();
-        if (_adaptiveInitialIntervalMilliseconds > 0)
+        var configuredFloor = Math.Max(1, Volatile.Read(ref _configuredMinIntervalMilliseconds));
+        var adaptiveInitialIntervalMilliseconds = Volatile.Read(ref _adaptiveInitialIntervalMilliseconds);
+
+        int nextAdaptiveMinIntervalMilliseconds;
+        if (adaptiveInitialIntervalMilliseconds > 0)
         {
-            var configuredFloor = Math.Max(1, _configuredMinIntervalMilliseconds);
-            var initial = Math.Max(configuredFloor, _adaptiveInitialIntervalMilliseconds);
-            var multiplierPower = Math.Max(0, _adaptiveBackoffHitCount);
+            var initial = Math.Max(configuredFloor, adaptiveInitialIntervalMilliseconds);
+            var multiplierPower = Math.Max(0, adaptiveBackoffHitCount);
             var next = ResolveSafePow2Multiply(initial, multiplierPower);
-            _adaptiveMinIntervalMilliseconds = Math.Min(adaptiveCap, next);
+            nextAdaptiveMinIntervalMilliseconds = Math.Min(adaptiveCap, next);
         }
         else
         {
             // 兼容历史行为：在当前有效间隔基础上 x2。
             var baseline = Math.Max(1, ResolveEffectiveMinIntervalMilliseconds());
             var next = ResolveSafeDouble(baseline);
-            _adaptiveMinIntervalMilliseconds = Math.Min(adaptiveCap, next);
+            nextAdaptiveMinIntervalMilliseconds = Math.Min(adaptiveCap, next);
         }
 
-        _adaptiveBackoffHitCount += 1;
-        _probeWindowSuccessCount = 0;
-        _cooldownUntilUtcMilliseconds = nowUtcMilliseconds + CooldownMilliseconds;
-        _probeWindowSuccessThreshold = Math.Min(MaxProbeWindowSuccessCount, Math.Max(MinProbeWindowSuccessCount, _probeWindowSuccessThreshold * 2));
+        Interlocked.Exchange(ref _adaptiveMinIntervalMilliseconds, nextAdaptiveMinIntervalMilliseconds);
+        Interlocked.Increment(ref _adaptiveBackoffHitCount);
+        Interlocked.Exchange(ref _probeWindowSuccessCount, 0);
+        Volatile.Write(ref _cooldownUntilUtcMilliseconds, nowUtcMilliseconds + CooldownMilliseconds);
+
+        while (true)
+        {
+            var currentThreshold = Volatile.Read(ref _probeWindowSuccessThreshold);
+            var nextThreshold = Math.Min(MaxProbeWindowSuccessCount, Math.Max(MinProbeWindowSuccessCount, currentThreshold * 2));
+            if (Interlocked.CompareExchange(ref _probeWindowSuccessThreshold, nextThreshold, currentThreshold) == currentThreshold)
+            {
+                break;
+            }
+        }
     }
 
     /// <summary>
@@ -171,40 +194,115 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
     /// <param name="nowUtcMilliseconds">当前 UTC 时间戳（毫秒）。</param>
     private void ObserveSuccess(long nowUtcMilliseconds)
     {
-        if (_adaptiveMinIntervalMilliseconds <= _configuredMinIntervalMilliseconds)
+        var configuredMinIntervalMilliseconds = Volatile.Read(ref _configuredMinIntervalMilliseconds);
+        var adaptiveMinIntervalMilliseconds = Volatile.Read(ref _adaptiveMinIntervalMilliseconds);
+        if (adaptiveMinIntervalMilliseconds <= configuredMinIntervalMilliseconds)
         {
-            _adaptiveMinIntervalMilliseconds = _configuredMinIntervalMilliseconds;
-            _probeWindowSuccessCount = 0;
+            Interlocked.Exchange(ref _adaptiveMinIntervalMilliseconds, configuredMinIntervalMilliseconds);
+            Interlocked.Exchange(ref _probeWindowSuccessCount, 0);
             return;
         }
 
-        if (nowUtcMilliseconds < _cooldownUntilUtcMilliseconds)
-        {
-            return;
-        }
-
-        _probeWindowSuccessCount += 1;
-        if (_probeWindowSuccessCount < _probeWindowSuccessThreshold)
+        if (nowUtcMilliseconds < Volatile.Read(ref _cooldownUntilUtcMilliseconds))
         {
             return;
         }
 
-        _probeWindowSuccessCount = 0;
-        var diff = _adaptiveMinIntervalMilliseconds - _configuredMinIntervalMilliseconds;
+        var observedSuccessCount = Interlocked.Increment(ref _probeWindowSuccessCount);
+        var probeWindowSuccessThreshold = Volatile.Read(ref _probeWindowSuccessThreshold);
+        if (observedSuccessCount < probeWindowSuccessThreshold)
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _probeWindowSuccessCount, 0, observedSuccessCount) != observedSuccessCount)
+        {
+            return;
+        }
+
+        adaptiveMinIntervalMilliseconds = Volatile.Read(ref _adaptiveMinIntervalMilliseconds);
+        configuredMinIntervalMilliseconds = Volatile.Read(ref _configuredMinIntervalMilliseconds);
+        var diff = adaptiveMinIntervalMilliseconds - configuredMinIntervalMilliseconds;
         var reduce = Math.Max(1, diff / 8);
-        _adaptiveMinIntervalMilliseconds = Math.Max(_configuredMinIntervalMilliseconds, _adaptiveMinIntervalMilliseconds - reduce);
-        if (_adaptiveBackoffHitCount > 0)
+        var nextAdaptiveMinIntervalMilliseconds = Math.Max(configuredMinIntervalMilliseconds, adaptiveMinIntervalMilliseconds - reduce);
+        Interlocked.Exchange(ref _adaptiveMinIntervalMilliseconds, nextAdaptiveMinIntervalMilliseconds);
+
+        while (true)
         {
-            _adaptiveBackoffHitCount -= 1;
+            var currentAdaptiveBackoffHitCount = Volatile.Read(ref _adaptiveBackoffHitCount);
+            if (currentAdaptiveBackoffHitCount <= 0)
+            {
+                break;
+            }
+
+            if (Interlocked.CompareExchange(ref _adaptiveBackoffHitCount, currentAdaptiveBackoffHitCount - 1, currentAdaptiveBackoffHitCount) == currentAdaptiveBackoffHitCount)
+            {
+                break;
+            }
         }
 
-        if (_adaptiveMinIntervalMilliseconds <= _configuredMinIntervalMilliseconds)
+        if (nextAdaptiveMinIntervalMilliseconds <= configuredMinIntervalMilliseconds)
         {
-            _probeWindowSuccessThreshold = MinProbeWindowSuccessCount;
+            Interlocked.Exchange(ref _probeWindowSuccessThreshold, MinProbeWindowSuccessCount);
         }
         else
         {
-            _probeWindowSuccessThreshold = Math.Max(MinProbeWindowSuccessCount, _probeWindowSuccessThreshold / 2);
+            while (true)
+            {
+                var currentThreshold = Volatile.Read(ref _probeWindowSuccessThreshold);
+                var nextThreshold = Math.Max(MinProbeWindowSuccessCount, currentThreshold / 2);
+                if (Interlocked.CompareExchange(ref _probeWindowSuccessThreshold, nextThreshold, currentThreshold) == currentThreshold)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    ///     确保自适应最小间隔不低于基础最小间隔。
+    /// </summary>
+    /// <param name="configuredMinIntervalMilliseconds">基础最小请求间隔。</param>
+    private void EnsureAdaptiveFloor(int configuredMinIntervalMilliseconds)
+    {
+        while (true)
+        {
+            var currentAdaptiveMinIntervalMilliseconds = Volatile.Read(ref _adaptiveMinIntervalMilliseconds);
+            if (currentAdaptiveMinIntervalMilliseconds >= configuredMinIntervalMilliseconds)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref _adaptiveMinIntervalMilliseconds, configuredMinIntervalMilliseconds, currentAdaptiveMinIntervalMilliseconds) == currentAdaptiveMinIntervalMilliseconds)
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     按上限裁剪命中次数。
+    /// </summary>
+    /// <param name="adaptiveBackoffMaxHits">命中次数上限。</param>
+    private void ClampAdaptiveHitCount(int adaptiveBackoffMaxHits)
+    {
+        if (adaptiveBackoffMaxHits <= 0)
+        {
+            return;
+        }
+
+        while (true)
+        {
+            var currentAdaptiveBackoffHitCount = Volatile.Read(ref _adaptiveBackoffHitCount);
+            if (currentAdaptiveBackoffHitCount <= adaptiveBackoffMaxHits)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref _adaptiveBackoffHitCount, adaptiveBackoffMaxHits, currentAdaptiveBackoffHitCount) == currentAdaptiveBackoffHitCount)
+            {
+                return;
+            }
         }
     }
 
@@ -214,13 +312,14 @@ public sealed class StableProbeNodeRequestFlowControlStrategy : INodeRequestFlow
     /// <returns>退避上限。</returns>
     private int ResolveAdaptiveMaxIntervalMilliseconds()
     {
-        if (_adaptiveMaxIntervalMilliseconds > 0)
+        var adaptiveMaxIntervalMilliseconds = Volatile.Read(ref _adaptiveMaxIntervalMilliseconds);
+        if (adaptiveMaxIntervalMilliseconds > 0)
         {
-            return _adaptiveMaxIntervalMilliseconds;
+            return adaptiveMaxIntervalMilliseconds;
         }
 
-        var configured = Math.Max(1, _configuredMinIntervalMilliseconds);
-        return Math.Max(configured, 60_000);
+        var configuredMinIntervalMilliseconds = Math.Max(1, Volatile.Read(ref _configuredMinIntervalMilliseconds));
+        return Math.Max(configuredMinIntervalMilliseconds, 60_000);
     }
 
     /// <summary>

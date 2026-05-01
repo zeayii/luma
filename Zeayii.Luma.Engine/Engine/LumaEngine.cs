@@ -100,9 +100,9 @@ public sealed class LumaEngine<TState>
     private readonly ConcurrentDictionary<string, StageConcurrencyController> _stageDownloadConcurrencyGates = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    ///     按阶段共享最小请求间隔限流器。
+    ///     按阶段共享最小请求间隔控制器。
     /// </summary>
-    private readonly ConcurrentDictionary<string, RateLimiter> _stageRequestIntervalLimiters = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, StageMinIntervalController> _stageRequestIntervalControllers = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     ///     全局最小请求间隔限流器。
@@ -342,6 +342,16 @@ public sealed class LumaEngine<TState>
     /// </summary>
     private void ResetRuntimeState()
     {
+        foreach (var flowController in _nodeTypeRequestFlowControllers.Values)
+        {
+            flowController.Dispose();
+        }
+
+        foreach (var concurrencyController in _nodeTypeConcurrencyControllers.Values)
+        {
+            concurrencyController.Dispose();
+        }
+
         _nodeRuntimes.Clear();
         _nodeTypeRequestFlowControllers.Clear();
         _nodeTypeConcurrencyControllers.Clear();
@@ -356,14 +366,14 @@ public sealed class LumaEngine<TState>
             gate.Dispose();
         }
 
-        foreach (var limiter in _stageRequestIntervalLimiters.Values)
+        foreach (var controller in _stageRequestIntervalControllers.Values)
         {
-            limiter.Dispose();
+            controller.Dispose();
         }
 
         _stageRequestConcurrencyGates.Clear();
         _stageDownloadConcurrencyGates.Clear();
-        _stageRequestIntervalLimiters.Clear();
+        _stageRequestIntervalControllers.Clear();
         _rootRuntime = null;
         _dirtyRuntimePathSet.Clear();
         while (_dirtyRuntimePaths.TryDequeue(out _))
@@ -915,12 +925,9 @@ public sealed class LumaEngine<TState>
         }
 
         var stageKey = NormalizeStageKey(stageOptions.StageKey);
-        var limiter = _stageRequestIntervalLimiters.GetOrAdd(stageKey, _ => CreateMinIntervalLimiter(stageOptions.MinRequestIntervalMilliseconds));
-        using var lease = await limiter.AcquireAsync(1, cancellationToken).ConfigureAwait(false);
-        if (!lease.IsAcquired)
-        {
-            throw new OperationCanceledException("Stage min-interval limiter lease was not acquired.", cancellationToken);
-        }
+        var controller = _stageRequestIntervalControllers.GetOrAdd(stageKey, _ => new StageMinIntervalController(stageOptions.MinRequestIntervalMilliseconds));
+        controller.Update(stageOptions.MinRequestIntervalMilliseconds);
+        await controller.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1250,6 +1257,8 @@ public sealed class LumaEngine<TState>
     /// <returns>合并后的选项。</returns>
     private static NodeStageExecutionOptions MergeStageExecutionOptions(NodeStageExecutionOptions existing, NodeStageExecutionOptions incoming)
     {
+        EnsureStageStaticConfigurationConsistency(existing, incoming);
+
         return new NodeStageExecutionOptions
         {
             StageKey = existing.StageKey,
@@ -1265,6 +1274,38 @@ public sealed class LumaEngine<TState>
             RiskControlMaxRetries = Math.Max(existing.RiskControlMaxRetries, incoming.RiskControlMaxRetries),
             RiskControlStatusCodes = existing.RiskControlStatusCodes.Concat(incoming.RiskControlStatusCodes).Distinct().OrderBy(static code => code).ToArray()
         };
+    }
+
+    /// <summary>
+    ///     校验阶段静态配置一致性（容量与背压模式）。
+    /// </summary>
+    /// <param name="existing">已存在选项。</param>
+    /// <param name="incoming">新选项。</param>
+    private static void EnsureStageStaticConfigurationConsistency(NodeStageExecutionOptions existing, NodeStageExecutionOptions incoming)
+    {
+        if (existing.RequestCapacity != incoming.RequestCapacity)
+        {
+            throw new InvalidOperationException(
+                $"Stage option conflict detected. Stage={existing.StageKey}, Option=RequestCapacity, Existing={existing.RequestCapacity}, Incoming={incoming.RequestCapacity}");
+        }
+
+        if (existing.DownloadCapacity != incoming.DownloadCapacity)
+        {
+            throw new InvalidOperationException(
+                $"Stage option conflict detected. Stage={existing.StageKey}, Option=DownloadCapacity, Existing={existing.DownloadCapacity}, Incoming={incoming.DownloadCapacity}");
+        }
+
+        if (existing.RequestBackpressureMode != incoming.RequestBackpressureMode)
+        {
+            throw new InvalidOperationException(
+                $"Stage option conflict detected. Stage={existing.StageKey}, Option=RequestBackpressureMode, Existing={existing.RequestBackpressureMode}, Incoming={incoming.RequestBackpressureMode}");
+        }
+
+        if (existing.DownloadBackpressureMode != incoming.DownloadBackpressureMode)
+        {
+            throw new InvalidOperationException(
+                $"Stage option conflict detected. Stage={existing.StageKey}, Option=DownloadBackpressureMode, Existing={existing.DownloadBackpressureMode}, Incoming={incoming.DownloadBackpressureMode}");
+        }
     }
 
     /// <summary>
@@ -2124,6 +2165,16 @@ public sealed class LumaEngine<TState>
         private int _configuredMinIntervalMilliseconds;
 
         /// <summary>
+        ///     额外间隔排队使用的“下次可用时间戳”（UTC 毫秒）。
+        /// </summary>
+        private long _nextAdditionalWindowUtcMilliseconds;
+
+        /// <summary>
+        ///     已退役待释放限流器集合。
+        /// </summary>
+        private readonly ConcurrentQueue<RateLimiter> _retiredRateLimiters = new();
+
+        /// <summary>
         ///     初始化节点类型请求流控器。
         /// </summary>
         /// <param name="nodeType">节点类型。</param>
@@ -2212,7 +2263,7 @@ public sealed class LumaEngine<TState>
             {
                 var previous = Interlocked.Exchange(ref _rateLimiter, CreateRateLimiter(nextMinIntervalMilliseconds));
                 Interlocked.Exchange(ref _configuredMinIntervalMilliseconds, nextMinIntervalMilliseconds);
-                previous.Dispose();
+                _retiredRateLimiters.Enqueue(previous);
             }
         }
 
@@ -2234,6 +2285,12 @@ public sealed class LumaEngine<TState>
             {
                 throw new OperationCanceledException("Rate limiter lease was not acquired.", cancellationToken);
             }
+
+            var configuredMinIntervalMilliseconds = Volatile.Read(ref _configuredMinIntervalMilliseconds);
+            if (effectiveMinIntervalMilliseconds > configuredMinIntervalMilliseconds)
+            {
+                await WaitAdditionalWindowAsync(effectiveMinIntervalMilliseconds, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         /// <summary>
@@ -2246,6 +2303,19 @@ public sealed class LumaEngine<TState>
         }
 
         /// <summary>
+        ///     释放节点类型请求流控器资源。
+        /// </summary>
+        public void Dispose()
+        {
+            while (_retiredRateLimiters.TryDequeue(out var retiredRateLimiter))
+            {
+                retiredRateLimiter.Dispose();
+            }
+
+            Volatile.Read(ref _rateLimiter).Dispose();
+        }
+
+        /// <summary>
         ///     解析可用策略键。
         /// </summary>
         /// <param name="strategyKey">输入策略键。</param>
@@ -2253,6 +2323,38 @@ public sealed class LumaEngine<TState>
         private static string ResolveStrategyKey(string? strategyKey)
         {
             return string.IsNullOrWhiteSpace(strategyKey) ? NodeRequestFlowControlStrategyRegistry.DefaultStrategyKey : strategyKey.Trim();
+        }
+
+        /// <summary>
+        ///     等待额外最小间隔窗口（用于自适应退避扩展窗口）。
+        /// </summary>
+        /// <param name="effectiveMinIntervalMilliseconds">当前有效最小请求间隔毫秒数。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async ValueTask WaitAdditionalWindowAsync(int effectiveMinIntervalMilliseconds, CancellationToken cancellationToken)
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var nowUtcMilliseconds = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
+                var previousNextWindow = Volatile.Read(ref _nextAdditionalWindowUtcMilliseconds);
+                var scheduledStart = Math.Max(nowUtcMilliseconds, previousNextWindow);
+                var nextWindow = scheduledStart + effectiveMinIntervalMilliseconds;
+
+                if (Interlocked.CompareExchange(ref _nextAdditionalWindowUtcMilliseconds, nextWindow, previousNextWindow) != previousNextWindow)
+                {
+                    continue;
+                }
+
+                var waitMilliseconds = scheduledStart - nowUtcMilliseconds;
+                if (waitMilliseconds > 0)
+                {
+                    await Task.Delay((int)Math.Min(int.MaxValue, waitMilliseconds), cancellationToken).ConfigureAwait(false);
+                }
+
+                return;
+            }
         }
 
         /// <summary>
@@ -2276,9 +2378,84 @@ public sealed class LumaEngine<TState>
     }
 
     /// <summary>
+    ///     阶段最小请求间隔控制器。
+    /// </summary>
+    private sealed class StageMinIntervalController : IDisposable
+    {
+        /// <summary>
+        ///     当前限流器。
+        /// </summary>
+        private RateLimiter _rateLimiter;
+
+        /// <summary>
+        ///     当前最小请求间隔（毫秒）。
+        /// </summary>
+        private int _configuredMinIntervalMilliseconds;
+
+        /// <summary>
+        ///     已退役待释放限流器集合。
+        /// </summary>
+        private readonly ConcurrentQueue<RateLimiter> _retiredRateLimiters = new();
+
+        /// <summary>
+        ///     初始化阶段最小间隔控制器。
+        /// </summary>
+        /// <param name="minIntervalMilliseconds">最小请求间隔（毫秒）。</param>
+        public StageMinIntervalController(int minIntervalMilliseconds)
+        {
+            _configuredMinIntervalMilliseconds = Math.Max(1, minIntervalMilliseconds);
+            _rateLimiter = CreateMinIntervalLimiter(_configuredMinIntervalMilliseconds);
+        }
+
+        /// <summary>
+        ///     更新最小请求间隔。
+        /// </summary>
+        /// <param name="minIntervalMilliseconds">最小请求间隔（毫秒）。</param>
+        public void Update(int minIntervalMilliseconds)
+        {
+            var nextMinIntervalMilliseconds = Math.Max(1, minIntervalMilliseconds);
+            if (nextMinIntervalMilliseconds == Volatile.Read(ref _configuredMinIntervalMilliseconds))
+            {
+                return;
+            }
+
+            var previous = Interlocked.Exchange(ref _rateLimiter, CreateMinIntervalLimiter(nextMinIntervalMilliseconds));
+            Interlocked.Exchange(ref _configuredMinIntervalMilliseconds, nextMinIntervalMilliseconds);
+            _retiredRateLimiters.Enqueue(previous);
+        }
+
+        /// <summary>
+        ///     等待阶段最小请求间隔。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
+        public async ValueTask WaitAsync(CancellationToken cancellationToken)
+        {
+            using var lease = await Volatile.Read(ref _rateLimiter).AcquireAsync(1, cancellationToken).ConfigureAwait(false);
+            if (!lease.IsAcquired)
+            {
+                throw new OperationCanceledException("Stage min-interval limiter lease was not acquired.", cancellationToken);
+            }
+        }
+
+        /// <summary>
+        ///     释放资源。
+        /// </summary>
+        public void Dispose()
+        {
+            while (_retiredRateLimiters.TryDequeue(out var retiredRateLimiter))
+            {
+                retiredRateLimiter.Dispose();
+            }
+
+            Volatile.Read(ref _rateLimiter).Dispose();
+        }
+    }
+
+    /// <summary>
     ///     节点类型并发闸门控制器。
     /// </summary>
-    private sealed class NodeTypeConcurrencyController
+    private sealed class NodeTypeConcurrencyController : IDisposable
     {
         /// <summary>
         ///     并发闸门信号量。
@@ -2326,6 +2503,14 @@ public sealed class LumaEngine<TState>
         {
             await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
             return new SemaphoreLease(_semaphore);
+        }
+
+        /// <summary>
+        ///     释放并发闸门资源。
+        /// </summary>
+        public void Dispose()
+        {
+            _semaphore.Dispose();
         }
     }
 

@@ -1,7 +1,6 @@
-using Zeayii.Luma.Abstractions.Models;
 using System.Collections.Concurrent;
-using System.Threading;
 using System.Threading.Channels;
+using Zeayii.Luma.Abstractions.Models;
 
 namespace Zeayii.Luma.Engine.Scheduling;
 
@@ -48,6 +47,11 @@ internal sealed class NodeTaskScheduler(int capacity) : IDisposable
     ///     当前队列长度。
     /// </summary>
     private long _count;
+
+    /// <summary>
+    ///     当前等待就绪信号的消费者数量。
+    /// </summary>
+    private long _waitingConsumerCount;
 
     /// <summary>
     ///     当前排队数量。
@@ -182,7 +186,16 @@ internal sealed class NodeTaskScheduler(int capacity) : IDisposable
                 return null;
             }
 
-            await _readySignal.WaitAsync(cancellationToken).ConfigureAwait(false);
+            Interlocked.Increment(ref _waitingConsumerCount);
+            try
+            {
+                await _readySignal.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _waitingConsumerCount);
+            }
+
             if (Volatile.Read(ref _completed) != 0 && Interlocked.Read(ref _count) <= 0)
             {
                 return null;
@@ -239,7 +252,7 @@ internal sealed class NodeTaskScheduler(int capacity) : IDisposable
             return true;
         }
 
-        request = default!;
+        request = null!;
         return false;
     }
 
@@ -258,7 +271,14 @@ internal sealed class NodeTaskScheduler(int capacity) : IDisposable
             queue.Channel.Writer.TryComplete();
         }
 
-        _readySignal.Release(1024);
+        var waitingCount = Interlocked.Read(ref _waitingConsumerCount);
+        if (waitingCount <= 0)
+        {
+            return;
+        }
+
+        var releaseCount = waitingCount > int.MaxValue ? int.MaxValue : (int)waitingCount;
+        _readySignal.Release(releaseCount);
     }
 
     /// <summary>
