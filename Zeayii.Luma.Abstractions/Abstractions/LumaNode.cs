@@ -196,6 +196,26 @@ public abstract class LumaNode<TState>
     }
 
     /// <summary>
+    ///     节点开始回调。
+    /// </summary>
+    /// <param name="context">节点上下文。</param>
+    public virtual void OnStarted(LumaContext<TState> context)
+    {
+        _ = context;
+    }
+
+    /// <summary>
+    ///     节点完成回调。
+    /// </summary>
+    /// <param name="status">完成状态。</param>
+    /// <param name="context">节点上下文。</param>
+    public virtual void OnCompleted(NodeCompletionStatus status, LumaContext<TState> context)
+    {
+        _ = status;
+        _ = context;
+    }
+
+    /// <summary>
     ///     节点异常处理钩子。
     /// </summary>
     /// <param name="exception">异常对象。</param>

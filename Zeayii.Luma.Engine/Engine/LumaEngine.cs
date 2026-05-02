@@ -195,6 +195,21 @@ public sealed class LumaEngine<TState>
     private LumaNodeRuntime<TState>? _rootRuntime;
 
     /// <summary>
+    ///     当前运行时宿主。
+    /// </summary>
+    private LumaRunRuntime? _activeRunRuntime;
+
+    /// <summary>
+    ///     当前运行普通请求调度器。
+    /// </summary>
+    private NodeTaskScheduler? _activeRequestScheduler;
+
+    /// <summary>
+    ///     当前运行持久化调度器。
+    /// </summary>
+    private PriorityTaskScheduler<ItemEnvelope<TState>>? _activePersistScheduler;
+
+    /// <summary>
     ///     已成功持久化数量。
     /// </summary>
     private long _storedItemCount;
@@ -271,10 +286,13 @@ public sealed class LumaEngine<TState>
 
                 try
                 {
-                    var persistWorkers = Enumerable.Range(0, effectivePersistWorkerCount).Select(_ => PersistWorkerAsync(persistScheduler, runRuntime)).ToArray();
+                    var persistWorkers = Enumerable.Range(0, effectivePersistWorkerCount).Select(_ => PersistWorkerAsync(persistScheduler, requestScheduler, runRuntime)).ToArray();
                     var requestWorkers = Enumerable.Range(0, effectiveRequestWorkerCount).Select(_ => RequestWorkerAsync(requestScheduler, downloadScheduler, persistScheduler, runRuntime)).ToArray();
                     var downloadWorkers = Enumerable.Range(0, _options.DownloadWorkerCount).Select(_ => DownloadWorkerAsync(downloadScheduler, requestScheduler, persistScheduler, runRuntime)).ToArray();
                     var snapshotTask = PublishSnapshotsLoopAsync(runRuntime, requestScheduler, downloadScheduler);
+                    _activeRunRuntime = runRuntime;
+                    _activeRequestScheduler = requestScheduler;
+                    _activePersistScheduler = persistScheduler;
                     var rootRuntime = await RegisterNodeAsync(rootNode, rootState, null, runRuntime, cookieAccessor, requestScheduler, persistScheduler, BranchPolicy.NewBranch).ConfigureAwait(false);
                     _rootRuntime = rootRuntime ?? throw new InvalidOperationException("Root runtime registration failed unexpectedly.");
 
@@ -320,6 +338,9 @@ public sealed class LumaEngine<TState>
                         }
 
                         _nodeRuntimes.Clear();
+                        _activeRunRuntime = null;
+                        _activeRequestScheduler = null;
+                        _activePersistScheduler = null;
                         LumaEngineLogMessages.RunFinishedLog(_logger, commandName, runName, Interlocked.Read(ref _storedItemCount), Interlocked.Read(ref _activeNetworkCount), requestScheduler.Count + downloadScheduler.Count, null);
                     }
                 }
@@ -465,6 +486,7 @@ public sealed class LumaEngine<TState>
         try
         {
             runtime.State.SetStatus(NodeExecutionStatus.Running);
+            runtime.Node.OnStarted(runtime.Context);
             await BuildNodeRequestsAsync(runtime, requestScheduler, runtime.Context.CancellationToken).ConfigureAwait(false);
             await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistScheduler, null).ConfigureAwait(false);
         }
@@ -1438,7 +1460,7 @@ public sealed class LumaEngine<TState>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <returns>异步任务。</returns>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "持久化循环需要吞吐保护，避免单批次失败中断全局。")]
-    private async Task PersistWorkerAsync(PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler, LumaRunRuntime runRuntime)
+    private async Task PersistWorkerAsync(PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler, NodeTaskScheduler requestScheduler, LumaRunRuntime runRuntime)
     {
         var buffer = new List<ItemEnvelope<TState>>(_options.PersistBatchSize);
         try
@@ -1446,7 +1468,7 @@ public sealed class LumaEngine<TState>
             while (await TryReadPersistEnvelopeAsync(persistScheduler, buffer, runRuntime.Token).ConfigureAwait(false))
             {
                 FillPersistBatchAsync(persistScheduler, buffer);
-                await FlushPersistBatchAsync(buffer, runRuntime, runRuntime.Token).ConfigureAwait(false);
+                await FlushPersistBatchAsync(buffer, requestScheduler, persistScheduler, runRuntime, runRuntime.Token).ConfigureAwait(false);
                 SignalStateChanged();
             }
         }
@@ -1460,7 +1482,7 @@ public sealed class LumaEngine<TState>
             using var finalFlushCancellationTokenSource = CreateFinalFlushCancellationTokenSource(runRuntime.Token);
             try
             {
-                await FlushPersistBatchAsync(buffer, runRuntime, finalFlushCancellationTokenSource.Token).ConfigureAwait(false);
+                await FlushPersistBatchAsync(buffer, requestScheduler, persistScheduler, runRuntime, finalFlushCancellationTokenSource.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (finalFlushCancellationTokenSource.IsCancellationRequested)
             {
@@ -1521,7 +1543,8 @@ public sealed class LumaEngine<TState>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>异步任务。</returns>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "持久化异常需转换为失败结果，不能终止整个运行。")]
-    private async Task FlushPersistBatchAsync(List<ItemEnvelope<TState>> buffer, LumaRunRuntime runRuntime, CancellationToken cancellationToken)
+    private async Task FlushPersistBatchAsync(List<ItemEnvelope<TState>> buffer, NodeTaskScheduler requestScheduler, PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler, LumaRunRuntime runRuntime,
+        CancellationToken cancellationToken)
     {
         if (buffer.Count <= 0)
         {
@@ -1629,6 +1652,7 @@ public sealed class LumaEngine<TState>
             try
             {
                 await runtime.Node.OnPersistedAsync(envelope.Item, persistResult, callbackContext).ConfigureAwait(false);
+                await DispatchNodeBatchAsync(runtime, runRuntime, requestScheduler, persistScheduler, envelope.SourceRequest).ConfigureAwait(false);
             }
             catch (LumaStopException stopException)
             {
@@ -1795,17 +1819,47 @@ public sealed class LumaEngine<TState>
                 continue;
             }
 
-            if (!runtime.TryCompleteSubtree() || _rootRuntime is null || string.Equals(path, _rootRuntime.Path, StringComparison.Ordinal))
+            if (!runtime.TryCompleteSubtree())
             {
                 continue;
             }
 
-            if (_dirtyRuntimePathSet.TryAdd(_rootRuntime.Path, 0))
+            runtime.Node.OnCompleted(MapCompletionStatus(runtime.State.Status), runtime.Context);
+            DispatchCompletionBatch(runtime);
+            if (_rootRuntime is not null && !string.Equals(path, _rootRuntime.Path, StringComparison.Ordinal) && _dirtyRuntimePathSet.TryAdd(_rootRuntime.Path, 0))
             {
                 _dirtyRuntimePaths.Enqueue(_rootRuntime.Path);
             }
         }
     }
+
+    private void DispatchCompletionBatch(LumaNodeRuntime<TState> runtime)
+    {
+        var runRuntime = _activeRunRuntime;
+        var requestScheduler = _activeRequestScheduler;
+        var persistScheduler = _activePersistScheduler;
+        if (runRuntime is null || requestScheduler is null || persistScheduler is null)
+        {
+            return;
+        }
+
+        var batch = runtime.Node.DrainDispatchBatch();
+        if (batch.Children.Count > 0 && batch.StopScope == NodeStopScope.None && !runtime.CancellationTokenSource.IsCancellationRequested)
+        {
+            StartChildRegistrations(batch.Children, runtime, runRuntime, requestScheduler, persistScheduler);
+        }
+    }
+
+    private static NodeCompletionStatus MapCompletionStatus(NodeExecutionStatus status)
+    {
+        return status switch
+        {
+            NodeExecutionStatus.Cancelled => NodeCompletionStatus.Cancelled,
+            NodeExecutionStatus.Failed => NodeCompletionStatus.Failed,
+            _ => NodeCompletionStatus.Succeeded
+        };
+    }
+
 
     /// <summary>
     ///     统一写入引擎运行日志。
