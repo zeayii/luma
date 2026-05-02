@@ -27,9 +27,9 @@ public sealed class NodeDispatchBatch<TState>
     public required IReadOnlyList<IItem> Items { get; init; }
 
     /// <summary>
-    ///     是否要求停止当前节点。
+    ///     停止作用域。
     /// </summary>
-    public required bool StopNode { get; init; }
+    public required NodeStopScope StopScope { get; init; }
 
     /// <summary>
     ///     节点停止原因。
@@ -39,5 +39,5 @@ public sealed class NodeDispatchBatch<TState>
     /// <summary>
     ///     是否包含任一待处理输出。
     /// </summary>
-    public bool HasWork => StopNode || Requests.Count > 0 || Children.Count > 0 || Items.Count > 0;
+    public bool HasWork => StopScope != NodeStopScope.None || Requests.Count > 0 || Children.Count > 0 || Items.Count > 0;
 }

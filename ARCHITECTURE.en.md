@@ -113,10 +113,8 @@ sequenceDiagram
 ## 8. Stop Semantics
 
 1. Nodes can actively request stop by throwing `LumaStopException`.
-2. `LumaStopScope.Node`: stop only the current node and its downstream subtree.
-3. `LumaStopScope.Run`: stop the current run.
-4. `LumaStopScope.App`: bubble to host so the host decides application-level shutdown.
-5. Keep `OperationCanceledException` for external cancellation (for example Ctrl+C), separated from business stop semantics.
+2. `LumaStopException` stops only the current node and its downstream subtree.
+3. Keep `OperationCanceledException` for external cancellation (for example Ctrl+C), separated from business stop semantics.
 
 ## 9. Private Extension Workflow
 

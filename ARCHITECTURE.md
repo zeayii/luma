@@ -113,10 +113,8 @@ sequenceDiagram
 ## 8. 停止语义
 
 1. Node 可通过抛出 `LumaStopException` 主动触发停止。
-2. `LumaStopScope.Node`：仅停止当前节点及其下游。
-3. `LumaStopScope.Run`：停止当前整次运行。
-4. `LumaStopScope.App`：上抛到宿主，由宿主决定应用级停机策略。
-5. `OperationCanceledException` 保留外部取消语义（例如 Ctrl+C），不与业务停止语义混用。
+2. `LumaStopException` 仅停止当前节点及其下游。
+3. `OperationCanceledException` 保留外部取消语义（例如 Ctrl+C），不与业务停止语义混用。
 
 ## 9. 私有扩展流程
 

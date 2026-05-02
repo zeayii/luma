@@ -11,4 +11,5 @@ namespace Zeayii.Luma.Abstractions.Models;
 /// <typeparam name="TState">节点状态类型。</typeparam>
 /// <param name="Node">子节点实例。</param>
 /// <param name="StateMapper">父状态到子状态的映射函数。</param>
-public readonly record struct NodeChildBinding<TState>(LumaNode<TState> Node, Func<TState, TState> StateMapper);
+/// <param name="BranchPolicy">子节点分支策略。</param>
+public readonly record struct NodeChildBinding<TState>(LumaNode<TState> Node, Func<TState, TState> StateMapper, BranchPolicy BranchPolicy);

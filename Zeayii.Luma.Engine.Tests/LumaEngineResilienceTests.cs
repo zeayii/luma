@@ -127,24 +127,6 @@ public sealed class LumaEngineResilienceTests
     }
 
     /// <summary>
-    ///     验证运行级停止异常会触发全局取消并终止运行。
-    /// </summary>
-    [Fact]
-    public async Task RunAsyncShouldStopRunWhenRunScopedStopExceptionThrown()
-    {
-        var stopNode = new RunScopedStopNode("stop-run");
-        var keepNode = new SingleItemNode("keep-child", "https://example.com/keep", new TestItem("K"));
-        var root = new ParentNode("root", new NodeExecutionOptions(LumaRouteKind.Auto, 1), stopNode, keepNode);
-        var fixture = CreateFixture();
-
-        await fixture.CreateEngine().RunAsync(new StaticSpider(root), "test-command", "run-global-stop-scope", CancellationToken.None).ConfigureAwait(true);
-
-        var snapshot = fixture.ProgressManager.LastSnapshot;
-        Assert.NotNull(snapshot);
-        Assert.Equal("Stopped", snapshot!.Status);
-    }
-
-    /// <summary>
     ///     验证节点异常处理钩子返回 KeepRunning 时不会中断整次运行。
     /// </summary>
     [Fact]
@@ -479,7 +461,7 @@ public sealed class LumaEngineResilienceTests
         public override ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            StopNode("parent-stop");
+            StopSelf("parent-stop");
             return ValueTask.CompletedTask;
         }
     }
@@ -611,30 +593,7 @@ public sealed class LumaEngineResilienceTests
         public override async IAsyncEnumerable<LumaRequest> BuildRequestsAsync(LumaContext<TestState> context)
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            throw new LumaStopException(LumaStopScope.Node, "NodeBusinessStop", "Node scoped stop requested.");
-#pragma warning disable CS0162
-            await Task.CompletedTask.ConfigureAwait(false);
-            yield break;
-#pragma warning restore CS0162
-        }
-
-        /// <inheritdoc />
-        public override ValueTask HandleResponseAsync(HttpResponseMessage response, LumaContext<TestState> context)
-        {
-            return ValueTask.CompletedTask;
-        }
-    }
-
-    /// <summary>
-    ///     运行级停止测试节点。
-    /// </summary>
-    private sealed class RunScopedStopNode(string key) : LumaNode<TestState>(key)
-    {
-        /// <inheritdoc />
-        public override async IAsyncEnumerable<LumaRequest> BuildRequestsAsync(LumaContext<TestState> context)
-        {
-            context.CancellationToken.ThrowIfCancellationRequested();
-            throw new LumaStopException(LumaStopScope.Run, "RunBusinessStop", "Run scoped stop requested.");
+            throw new LumaStopException("NodeBusinessStop", "Node scoped stop requested.");
 #pragma warning disable CS0162
             await Task.CompletedTask.ConfigureAwait(false);
             yield break;

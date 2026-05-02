@@ -38,9 +38,9 @@ public abstract class LumaNode<TState>
     private string _stopReason = string.Empty;
 
     /// <summary>
-    ///     停止标记。
+    ///     停止作用域。
     /// </summary>
-    private bool _stopRequested;
+    private NodeStopScope _stopScope = NodeStopScope.None;
 
     /// <summary>
     ///     初始化节点。
@@ -212,9 +212,10 @@ public abstract class LumaNode<TState>
     ///     添加子节点（复用父状态）。
     /// </summary>
     /// <param name="child">子节点实例。</param>
-    protected void AddChild(LumaNode<TState> child)
+    /// <param name="branchPolicy">子节点分支策略。</param>
+    protected void AddChild(LumaNode<TState> child, BranchPolicy branchPolicy = BranchPolicy.InheritParent)
     {
-        AddChild(child, static state => state);
+        AddChildCore(child, static state => state, branchPolicy);
     }
 
     /// <summary>
@@ -222,14 +223,26 @@ public abstract class LumaNode<TState>
     /// </summary>
     /// <param name="child">子节点实例。</param>
     /// <param name="stateMapper">父状态到子状态的映射函数。</param>
-    protected void AddChild(LumaNode<TState> child, Func<TState, TState> stateMapper)
+    /// <param name="branchPolicy">子节点分支策略。</param>
+    protected void AddChild(LumaNode<TState> child, Func<TState, TState> stateMapper, BranchPolicy branchPolicy = BranchPolicy.InheritParent)
+    {
+        AddChildCore(child, stateMapper, branchPolicy);
+    }
+
+    /// <summary>
+    ///     添加子节点核心实现。
+    /// </summary>
+    /// <param name="child">子节点实例。</param>
+    /// <param name="stateMapper">父状态到子状态的映射函数。</param>
+    /// <param name="branchPolicy">子节点分支策略。</param>
+    private void AddChildCore(LumaNode<TState> child, Func<TState, TState> stateMapper, BranchPolicy branchPolicy)
     {
         ArgumentNullException.ThrowIfNull(child);
         ArgumentNullException.ThrowIfNull(stateMapper);
 
         lock (_outputSyncRoot)
         {
-            _pendingChildren.Add(new NodeChildBinding<TState>(child, stateMapper));
+            _pendingChildren.Add(new NodeChildBinding<TState>(child, stateMapper, branchPolicy));
         }
     }
 
@@ -263,11 +276,24 @@ public abstract class LumaNode<TState>
     ///     请求停止当前节点。
     /// </summary>
     /// <param name="reason">停止原因。</param>
-    protected void StopNode(string reason)
+    protected void StopSelf(string reason)
     {
         lock (_outputSyncRoot)
         {
-            _stopRequested = true;
+            _stopScope = NodeStopScope.Self;
+            _stopReason = reason;
+        }
+    }
+
+    /// <summary>
+    ///     请求停止当前分支。
+    /// </summary>
+    /// <param name="reason">停止原因。</param>
+    protected void StopBranch(string reason)
+    {
+        lock (_outputSyncRoot)
+        {
+            _stopScope = NodeStopScope.Branch;
             _stopReason = reason;
         }
     }
@@ -283,13 +309,13 @@ public abstract class LumaNode<TState>
             var requests = _pendingRequests.Count == 0 ? Array.Empty<LumaRequest>() : _pendingRequests.ToArray();
             var children = _pendingChildren.Count == 0 ? Array.Empty<NodeChildBinding<TState>>() : _pendingChildren.ToArray();
             var items = _pendingItems.Count == 0 ? Array.Empty<IItem>() : _pendingItems.ToArray();
-            var stopNode = _stopRequested;
+            var stopScope = _stopScope;
             var stopReason = _stopReason;
 
             _pendingRequests.Clear();
             _pendingChildren.Clear();
             _pendingItems.Clear();
-            _stopRequested = false;
+            _stopScope = NodeStopScope.None;
             _stopReason = string.Empty;
 
             return new NodeDispatchBatch<TState>
@@ -297,7 +323,7 @@ public abstract class LumaNode<TState>
                 Requests = requests,
                 Children = children,
                 Items = items,
-                StopNode = stopNode,
+                StopScope = stopScope,
                 StopReason = stopReason
             };
         }

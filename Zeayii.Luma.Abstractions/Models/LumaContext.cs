@@ -257,6 +257,7 @@ public sealed class LumaContext<TState>
     ///     构造 Cookie 对应地址。
     /// </summary>
     /// <param name="cookie">Cookie 对象。</param>
+    /// <param name="uri">Cookie域名</param>
     /// <returns>Cookie 地址。</returns>
     private static Cookie NormalizeCookieForUri(Cookie cookie, Uri uri)
     {

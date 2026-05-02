@@ -126,6 +126,11 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     public int Depth { get; }
 
     /// <summary>
+    ///     当前节点所属分支的根节点运行时。
+    /// </summary>
+    public LumaNodeRuntime<TState>? BranchRootRuntime { get; private set; }
+
+    /// <summary>
     ///     节点取消源。
     /// </summary>
     public CancellationTokenSource CancellationTokenSource { get; }
@@ -274,6 +279,34 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
         {
             CancellationTokenSource.Cancel();
         }
+    }
+
+    /// <summary>
+    ///     绑定分支根运行时。
+    /// </summary>
+    /// <param name="branchRootRuntime">分支根运行时。</param>
+    public void BindBranchRoot(LumaNodeRuntime<TState> branchRootRuntime)
+    {
+        BranchRootRuntime = branchRootRuntime ?? throw new ArgumentNullException(nameof(branchRootRuntime));
+    }
+
+    /// <summary>
+    ///     停止当前节点。
+    /// </summary>
+    /// <param name="reason">停止原因。</param>
+    public void CancelSelf(string reason)
+    {
+        Cancel(reason);
+    }
+
+    /// <summary>
+    ///     停止当前分支。
+    /// </summary>
+    /// <param name="reason">停止原因。</param>
+    public void CancelBranch(string reason)
+    {
+        var branchRootRuntime = BranchRootRuntime ?? this;
+        branchRootRuntime.Cancel(reason);
     }
 
     /// <summary>
