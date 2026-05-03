@@ -56,6 +56,16 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     private int _subtreeCompleted;
 
     /// <summary>
+    ///     子树完成流程进行中标记。
+    /// </summary>
+    private int _subtreeCompleting;
+
+    /// <summary>
+    ///     完成回调是否已触发。
+    /// </summary>
+    private int _completionCallbackInvoked;
+
+    /// <summary>
     ///     初始化节点运行时。
     /// </summary>
     /// <param name="node">抽象层节点。</param>
@@ -310,29 +320,42 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     }
 
     /// <summary>
-    ///     尝试完成当前节点子树。
+    ///     尝试进入子树完成流程。
     /// </summary>
-    /// <returns>本次调用是否完成子树。</returns>
-    public bool TryCompleteSubtree()
+    /// <returns>返回 <c>true</c> 表示当前调用获得完成流程处理权。</returns>
+    public bool TryBeginSubtreeCompletion()
     {
         if (Volatile.Read(ref _subtreeCompleted) != 0)
         {
             return false;
         }
 
-        if (State.ActiveRequestCount > 0 ||
-            State.QueuedRequestCount > 0 ||
-            RegisteringChildCount > 0 ||
-            PendingChildRegistrationTaskCount > 0 ||
-            InitializingCount > 0 ||
-            PendingChildSubtreeCount > 0 ||
-            State.Status == NodeExecutionStatus.Pending)
+        if (!IsQuiescent())
         {
             return false;
         }
 
-        if (Interlocked.CompareExchange(ref _subtreeCompleted, 1, 0) != 0)
+        return Interlocked.CompareExchange(ref _subtreeCompleting, 1, 0) == 0;
+    }
+
+    /// <summary>
+    ///     标记完成回调是否首次触发。
+    /// </summary>
+    /// <returns>首次触发返回 <c>true</c>。</returns>
+    public bool TryMarkCompletionCallbackInvoked()
+    {
+        return Interlocked.CompareExchange(ref _completionCallbackInvoked, 1, 0) == 0;
+    }
+
+    /// <summary>
+    ///     尝试在完成流程末尾最终完成子树。
+    /// </summary>
+    /// <returns>返回 <c>true</c> 表示本次成功完成子树。</returns>
+    public bool TryFinalizeSubtreeCompletion()
+    {
+        if (Volatile.Read(ref _subtreeCompleted) != 0 || !IsQuiescent() || Interlocked.CompareExchange(ref _subtreeCompleted, 1, 0) != 0)
         {
+            Interlocked.Exchange(ref _subtreeCompleting, 0);
             return false;
         }
 
@@ -342,6 +365,18 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
         }
 
         _subtreeCompletionSource.TrySetResult();
+        Interlocked.Exchange(ref _subtreeCompleting, 0);
         return true;
+    }
+
+    /// <summary>
+    ///     判断当前节点是否处于可完成的静止态。
+    /// </summary>
+    /// <returns>静止态返回 <c>true</c>。</returns>
+    private bool IsQuiescent()
+    {
+        return State is { ActiveRequestCount: <= 0, QueuedRequestCount: <= 0 } &&
+               RegisteringChildCount <= 0 && PendingChildRegistrationTaskCount <= 0 &&
+               InitializingCount <= 0 && PendingChildSubtreeCount <= 0 && State.Status != NodeExecutionStatus.Pending;
     }
 }
