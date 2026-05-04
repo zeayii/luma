@@ -348,6 +348,14 @@ internal sealed class LumaNodeRuntime<TState> : IAsyncDisposable
     }
 
     /// <summary>
+    ///     重置完成回调触发标记。
+    /// </summary>
+    public void ResetCompletionCallbackInvoked()
+    {
+        Interlocked.Exchange(ref _completionCallbackInvoked, 0);
+    }
+
+    /// <summary>
     ///     尝试在完成流程末尾最终完成子树。
     /// </summary>
     /// <returns>返回 <c>true</c> 表示本次成功完成子树。</returns>

@@ -195,6 +195,16 @@ public sealed class LumaEngine<TState>
     private long _stateVersion;
 
     /// <summary>
+    ///     是否已提交运行完成。
+    /// </summary>
+    private int _runCompletionCommitted;
+
+    /// <summary>
+    ///     子节点注册启动变更版本号（无锁序列戳，偶数=静止，奇数=变更中）。
+    /// </summary>
+    private long _childRegistrationMutationVersion;
+
+    /// <summary>
     ///     根节点运行时。
     /// </summary>
     private LumaNodeRuntime<TState>? _rootRuntime;
@@ -250,9 +260,7 @@ public sealed class LumaEngine<TState>
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _timeProvider = options.TimeProvider;
         _flowControlStrategyResolver = options.NodeFlowControlStrategyResolver ?? NodeRequestFlowControlStrategyRegistry.ResolveOrDefault;
-        _globalRequestIntervalLimiter = options.GlobalMinRequestIntervalMilliseconds > 0
-            ? CreateMinIntervalLimiter(options.GlobalMinRequestIntervalMilliseconds)
-            : null;
+        _globalRequestIntervalLimiter = options.GlobalMinRequestIntervalMilliseconds > 0 ? CreateMinIntervalLimiter(options.GlobalMinRequestIntervalMilliseconds) : null;
     }
 
     /// <summary>
@@ -413,6 +421,8 @@ public sealed class LumaEngine<TState>
         Interlocked.Exchange(ref _lastRunWaitingLogTimestampMs, 0);
         Interlocked.Exchange(ref _persistBatchSummarySequence, 0);
         Interlocked.Exchange(ref _stateVersion, 0);
+        Interlocked.Exchange(ref _runCompletionCommitted, 0);
+        Interlocked.Exchange(ref _childRegistrationMutationVersion, 0);
         _childSlotWaitLastLogTimestampByParentPath.Clear();
         while (_stateSignalChannel.Reader.TryRead(out _))
         {
@@ -543,9 +553,18 @@ public sealed class LumaEngine<TState>
 
             var stageOptions = ResolveStageExecutionOptions(runtime);
             var normalizedRequest = NormalizeRequest(request, runtime.Path, stageOptions.StageKey);
-            await EnqueueRequestWithStageControlAsync(runtime, normalizedRequest, requestScheduler, cancellationToken).ConfigureAwait(false);
             runtime.State.IncrementQueued();
             SignalStateChanged(runtime);
+            try
+            {
+                await EnqueueRequestWithStageControlAsync(runtime, normalizedRequest, requestScheduler, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                runtime.State.DecrementQueued();
+                SignalStateChanged(runtime);
+                throw;
+            }
         }
     }
 
@@ -576,8 +595,8 @@ public sealed class LumaEngine<TState>
                     continue;
                 }
 
-                runtime.State.DecrementQueued();
                 runtime.State.IncrementActive();
+                runtime.State.DecrementQueued();
                 SignalStateChanged(runtime);
                 var activeMarked = true;
                 var networkMarked = false;
@@ -629,9 +648,18 @@ public sealed class LumaEngine<TState>
                             {
                                 var stageOptions = ResolveStageExecutionOptions(runtime);
                                 var normalizedDownloadRequest = NormalizeRequest(downloadRequest, runtime.Path, stageOptions.StageKey);
-                                await EnqueueDownloadWithStageControlAsync(runtime, normalizedDownloadRequest, downloadScheduler, runRuntime.Token).ConfigureAwait(false);
                                 runtime.State.IncrementQueued();
                                 SignalStateChanged(runtime);
+                                try
+                                {
+                                    await EnqueueDownloadWithStageControlAsync(runtime, normalizedDownloadRequest, downloadScheduler, runRuntime.Token).ConfigureAwait(false);
+                                }
+                                catch
+                                {
+                                    runtime.State.DecrementQueued();
+                                    SignalStateChanged(runtime);
+                                    throw;
+                                }
                             }
                         }
                         catch (Exception exception)
@@ -710,8 +738,8 @@ public sealed class LumaEngine<TState>
                     continue;
                 }
 
-                runtime.State.DecrementQueued();
                 runtime.State.IncrementActive();
+                runtime.State.DecrementQueued();
                 SignalStateChanged(runtime);
                 var activeMarked = true;
                 var networkMarked = false;
@@ -746,6 +774,7 @@ public sealed class LumaEngine<TState>
                 }
                 catch (OperationCanceledException) when (runtime.CancellationTokenSource.IsCancellationRequested || runRuntime.Token.IsCancellationRequested)
                 {
+                    // ignore
                 }
                 catch (Exception exception)
                 {
@@ -800,13 +829,17 @@ public sealed class LumaEngine<TState>
         switch (dispatchBatch.StopScope)
         {
             case NodeStopScope.Self:
+            {
                 runtime.CancelSelf(dispatchBatch.StopReason);
                 SignalStateChanged(runtime);
                 break;
+            }
             case NodeStopScope.Branch:
+            {
                 runtime.CancelBranch(dispatchBatch.StopReason);
                 SignalStateChanged(runtime);
                 break;
+            }
         }
 
         var shouldBlockExpansion = dispatchBatch.StopScope != NodeStopScope.None || runtime.CancellationTokenSource.IsCancellationRequested;
@@ -817,9 +850,18 @@ public sealed class LumaEngine<TState>
             {
                 var stageOptions = ResolveStageExecutionOptions(runtime);
                 var normalizedRequest = NormalizeRequest(request, runtime.Path, stageOptions.StageKey);
-                await EnqueueRequestWithStageControlAsync(runtime, normalizedRequest, requestScheduler, runRuntime.Token).ConfigureAwait(false);
                 runtime.State.IncrementQueued();
                 SignalStateChanged(runtime);
+                try
+                {
+                    await EnqueueRequestWithStageControlAsync(runtime, normalizedRequest, requestScheduler, runRuntime.Token).ConfigureAwait(false);
+                }
+                catch
+                {
+                    runtime.State.DecrementQueued();
+                    SignalStateChanged(runtime);
+                    throw;
+                }
             }
         }
 
@@ -850,12 +892,25 @@ public sealed class LumaEngine<TState>
             return;
         }
 
-        var childIndex = 0;
-        foreach (var childBinding in children)
+        Interlocked.Increment(ref _childRegistrationMutationVersion);
+        try
         {
-            childIndex++;
-            parentRuntime.IncrementPendingChildRegistrationTask();
-            _ = RegisterChildWithSlotAsync(childBinding, parentRuntime, runRuntime, requestScheduler, persistScheduler, childIndex);
+            if (Volatile.Read(ref _runCompletionCommitted) != 0)
+            {
+                return;
+            }
+
+            var childIndex = 0;
+            foreach (var childBinding in children)
+            {
+                childIndex++;
+                parentRuntime.IncrementPendingChildRegistrationTask();
+                _ = RegisterChildWithSlotAsync(childBinding, parentRuntime, runRuntime, requestScheduler, persistScheduler, childIndex);
+            }
+        }
+        finally
+        {
+            Interlocked.Increment(ref _childRegistrationMutationVersion);
         }
 
         SignalStateChanged(parentRuntime);
@@ -925,19 +980,23 @@ public sealed class LumaEngine<TState>
     private async Task RegisterChildInternalAsync(NodeChildBinding<TState> childBinding, LumaNodeRuntime<TState> parentRuntime, LumaRunRuntime runRuntime, NodeTaskScheduler requestScheduler,
         PriorityTaskScheduler<ItemEnvelope<TState>> persistScheduler)
     {
+        var pendingChildSubtreeReserved = false;
+        var pendingChildSubtreeTransferred = false;
         try
         {
+            parentRuntime.IncrementPendingChildSubtree();
+            pendingChildSubtreeReserved = true;
             var childState = childBinding.StateMapper(parentRuntime.Context.State);
             var cookieAccessor = new NetCookieAccessor(_netClient, ResolveRouteKind);
-            var childRuntime = await RegisterNodeAsync(childBinding.Node, childState, parentRuntime, runRuntime, cookieAccessor, requestScheduler, persistScheduler, childBinding.BranchPolicy)
-                .ConfigureAwait(false);
+            var childRuntime = await RegisterNodeAsync(childBinding.Node, childState, parentRuntime, runRuntime, cookieAccessor, requestScheduler, persistScheduler, childBinding.BranchPolicy).ConfigureAwait(false);
             if (childRuntime is null)
             {
+                parentRuntime.DecrementPendingChildSubtree();
+                pendingChildSubtreeReserved = false;
                 parentRuntime.ReleaseChildSlot();
                 return;
             }
 
-            parentRuntime.IncrementPendingChildSubtree();
             _ = childRuntime.SubtreeCompletionTask.ContinueWith(
                 _ =>
                 {
@@ -947,10 +1006,17 @@ public sealed class LumaEngine<TState>
                 },
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
-                TaskScheduler.Default);
+                TaskScheduler.Default
+            );
+            pendingChildSubtreeTransferred = true;
         }
         catch
         {
+            if (pendingChildSubtreeReserved && !pendingChildSubtreeTransferred)
+            {
+                parentRuntime.DecrementPendingChildSubtree();
+            }
+
             parentRuntime.ReleaseChildSlot();
             throw;
         }
@@ -1556,6 +1622,7 @@ public sealed class LumaEngine<TState>
     ///     刷新当前持久化批次。
     /// </summary>
     /// <param name="buffer">缓冲区。</param>
+    /// <param name="persistScheduler">持久化调度器</param>
     /// <param name="runRuntime">运行时宿主。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <param name="requestScheduler">请求调度器</param>
@@ -1751,6 +1818,34 @@ public sealed class LumaEngine<TState>
                     continue;
                 }
 
+                var registrationVersionBefore = Volatile.Read(ref _childRegistrationMutationVersion);
+                if ((registrationVersionBefore & 1L) != 0)
+                {
+                    continue;
+                }
+
+                if (!IsRunCompleted(requestScheduler, downloadScheduler))
+                {
+                    continue;
+                }
+
+                var registrationVersionAfter = Volatile.Read(ref _childRegistrationMutationVersion);
+                if (registrationVersionAfter != registrationVersionBefore || (registrationVersionAfter & 1L) != 0)
+                {
+                    continue;
+                }
+
+                if (Interlocked.CompareExchange(ref _runCompletionCommitted, 1, 0) != 0)
+                {
+                    return;
+                }
+
+                if (!IsRunCompleted(requestScheduler, downloadScheduler) || Volatile.Read(ref _childRegistrationMutationVersion) != registrationVersionAfter)
+                {
+                    Interlocked.Exchange(ref _runCompletionCommitted, 0);
+                    continue;
+                }
+
                 var runtimeCount = _nodeRuntimes.Count;
                 var runningRuntimeCount = _nodeRuntimes.Values.Count(static runtime => runtime.State.Status is NodeExecutionStatus.Running or NodeExecutionStatus.Stopping);
                 var pendingRegistrationCount = _nodeRuntimes.Values.Sum(static runtime => runtime.PendingChildRegistrationTaskCount);
@@ -1866,7 +1961,8 @@ public sealed class LumaEngine<TState>
                 continue;
             }
 
-            if (runtime.TryMarkCompletionCallbackInvoked())
+            var completionCallbackInvoked = runtime.TryMarkCompletionCallbackInvoked();
+            if (completionCallbackInvoked)
             {
                 runtime.Node.OnCompleted(MapCompletionStatus(runtime.State.Status), runtime.Context);
             }
@@ -1875,6 +1971,11 @@ public sealed class LumaEngine<TState>
 
             if (!runtime.TryFinalizeSubtreeCompletion())
             {
+                if (completionCallbackInvoked)
+                {
+                    runtime.ResetCompletionCallbackInvoked();
+                }
+
                 if (_dirtyRuntimePathSet.TryAdd(path, 0))
                 {
                     _dirtyRuntimePaths.Enqueue(path);
@@ -2946,5 +3047,4 @@ internal static class LumaEngineLogMessages
     /// </summary>
     internal static readonly Action<ILogger, string, string, string, Exception?> NodeScopedStopLog =
         LoggerMessage.Define<string, string, string>(LogLevel.Warning, new EventId(1008, nameof(NodeScopedStopLog)), "Node scoped stop triggered. Node={NodePath}, Code={Code}, Reason={Reason}");
-
 }
